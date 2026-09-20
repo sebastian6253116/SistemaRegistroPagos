@@ -1,0 +1,4767 @@
+openapi: 3.0.3
+info:
+  title: Sistema de Gestion de Cobros - API
+  version: 1.0.0
+  description: |
+    API REST del Sistema de Gestion de Cobros (recaudacion, conciliacion bancaria,
+    importacion de extractos, gastos, reportes y auditoria).
+
+    Base path: `/api`. Autenticacion mediante JWT de acceso enviado como
+    `Authorization: Bearer <accessToken>`.
+
+    Formato de listas: `{ "data": [...], "meta": { page, pageSize, total, totalPages } }`.
+    Formato de errores: `{ "error": { "code", "message", "details?" } }`.
+
+    Los montos y tasas viajan como STRING en JSON (p. ej. `"3600.00"`) para
+    preservar la precision de `DECIMAL(18,2)` / `DECIMAL(18,6)`.
+servers:
+  - url: 'http://localhost:{port}/api'
+    description: Servidor local de desarrollo
+    variables:
+      port:
+        default: '4000'
+        description: Puerto del API (variable de entorno PORT)
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: Autenticacion, sesion y gestion de contrasena
+  - name: Usuarios
+    description: Gestion de usuarios del sistema
+  - name: Roles
+    description: Roles y catalogo de permisos
+  - name: Cobradores
+    description: Catalogo de cobradores
+  - name: Bancos
+    description: Catalogo de bancos
+  - name: Cuentas
+    description: Cuentas recaudadoras
+  - name: Tipos de pago
+    description: Catalogo configurable de formas de pago y tipo predeterminado
+  - name: Tasas
+    description: Tasas de referencia (una por dia)
+  - name: Tasa BCV
+    description: Historico informativo de la tasa BCV y su job de sincronizacion
+  - name: Parametros
+    description: Parametros de configuracion (tolerancias y umbrales)
+  - name: Catalogos
+    description: Catalogos ligeros de solo lectura para formularios
+  - name: Pagos
+    description: Reporte, consulta y edicion de pagos reportados
+  - name: Conciliacion
+    description: Conciliacion bancaria (coincidencias, validacion, rechazo, duplicados)
+  - name: Movimientos
+    description: Movimientos bancarios importados
+  - name: Importacion
+    description: Importacion de extractos bancarios y lotes
+  - name: Gastos
+    description: Gestion de gastos y comprobantes de soporte
+  - name: Archivos
+    description: Descarga autenticada y autorizada de archivos de soporte almacenados
+  - name: Notificaciones
+    description: Notificaciones internas del usuario autenticado
+  - name: Dashboard
+    description: Agregados y series para el tablero
+  - name: Reportes
+    description: Reportes analiticos y exportacion a Excel/PDF
+  - name: Auditoria
+    description: Bitacora de auditoria (solo lectura)
+  - name: Health
+    description: Estado del servicio
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: healthCheck
+      summary: Estado del servicio
+      description: Endpoint publico de healthcheck. No requiere autenticacion.
+      security: []
+      responses:
+        '200':
+          description: Servicio operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  env:
+                    type: string
+                    enum: [development, test, production]
+                    example: development
+              example:
+                status: ok
+                env: development
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: authLogin
+      summary: Iniciar sesion
+      description: |
+        Autentica con usuario o email + contrasena. Aplica bloqueo por intentos
+        fallidos (5 por defecto, 15 minutos) y rate limit (20 intentos / 15 min).
+        No requiere permisos. Endpoint publico.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usuario, password]
+              properties:
+                usuario:
+                  type: string
+                  description: Nombre de usuario o email
+                  maxLength: 150
+                  example: admin
+                password:
+                  type: string
+                  maxLength: 200
+                  example: Admin12345
+            example:
+              usuario: admin
+              password: Admin12345
+      responses:
+        '200':
+          description: Sesion iniciada. Devuelve el usuario y el par de tokens.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResult'
+              example:
+                user:
+                  id: 1
+                  usuario: admin
+                  nombreCompleto: Administrador General
+                  rolId: 1
+                  rol: Administrador
+                  permisos: [usuarios.ver, pagos.validar, reportes.ver]
+                  cobradorId: null
+                tokens:
+                  accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  refreshToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                  expiresIn: 15m
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: authRefresh
+      summary: Refrescar tokens
+      description: |
+        Rota el refresh token (revoca el anterior) y emite un nuevo par.
+        Endpoint publico.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+            example:
+              refreshToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+      responses:
+        '200':
+          description: Nuevo par de tokens emitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: authLogout
+      summary: Cerrar sesion
+      description: |
+        Revoca el refresh token indicado. No requiere access token (endpoint
+        publico). Responde 204 sin cuerpo.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+            example:
+              refreshToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+      responses:
+        '204':
+          description: Sesion cerrada (sin contenido)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      operationId: authForgotPassword
+      summary: Solicitar recuperacion de contrasena
+      description: |
+        Inicia el flujo de recuperacion. Rate limit 10 solicitudes / 30 min.
+        En entornos no productivos devuelve `token` para pruebas; en produccion
+        se enviaria por correo. Endpoint publico.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: admin@empresa.com
+            example:
+              email: admin@empresa.com
+      responses:
+        '200':
+          description: Solicitud procesada (respuesta generica para no revelar si la cuenta existe)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  token:
+                    type: string
+                    description: Solo presente cuando NODE_ENV != production
+              example:
+                message: Si el correo existe, se envio un enlace de recuperacion.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      operationId: authResetPassword
+      summary: Restablecer contrasena con token
+      description: |
+        Completa la recuperacion con un token valido, no usado y no expirado.
+        Revoca las sesiones activas del usuario. Rate limit 10 / 30 min.
+        Endpoint publico.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token:
+                  type: string
+                  example: 5f2c9b7a1d3e4f60718293a4b5c6d7e8
+                password:
+                  type: string
+                  minLength: 8
+                  maxLength: 200
+                  example: NuevaClave123
+            example:
+              token: 5f2c9b7a1d3e4f60718293a4b5c6d7e8
+              password: NuevaClave123
+      responses:
+        '200':
+          description: Contrasena restablecida
+          content:
+            application/json:
+              example:
+                message: Contrasena restablecida correctamente.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: authMe
+      summary: Usuario autenticado actual
+      description: 'Requiere autenticacion (Bearer). Devuelve el usuario con su rol y permisos efectivos.'
+      responses:
+        '200':
+          description: Usuario autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUser'
+              example:
+                id: 1
+                usuario: admin
+                nombreCompleto: Administrador General
+                rolId: 1
+                rol: Administrador
+                permisos: [usuarios.ver, pagos.validar, reportes.ver]
+                cobradorId: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      operationId: authChangePassword
+      summary: Cambiar contrasena del usuario autenticado
+      description: 'Requiere autenticacion (Bearer). Valida la contrasena actual y aplica la nueva.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [passwordActual, passwordNueva]
+              properties:
+                passwordActual:
+                  type: string
+                  example: Admin12345
+                passwordNueva:
+                  type: string
+                  minLength: 8
+                  maxLength: 200
+                  example: NuevaClave123
+            example:
+              passwordActual: Admin12345
+              passwordNueva: NuevaClave123
+      responses:
+        '200':
+          description: Contrasena actualizada
+          content:
+            application/json:
+              example:
+                message: Contrasena actualizada correctamente.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /usuarios:
+    get:
+      tags: [Usuarios]
+      operationId: listUsuarios
+      summary: Listar usuarios
+      description: 'Requiere permiso: usuarios.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: search
+          in: query
+          required: false
+          description: Busca por nombre completo, usuario o email
+          schema: { type: string, maxLength: 150, example: admin }
+        - name: rolId
+          in: query
+          required: false
+          description: Filtra por rol
+          schema: { type: integer, example: 1 }
+        - name: activo
+          in: query
+          required: false
+          description: Filtra por estado activo
+          schema: { type: boolean, example: true }
+      responses:
+        '200':
+          description: Lista paginada de usuarios
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsuarioPage'
+              example:
+                data:
+                  - id: 1
+                    nombreCompleto: Administrador General
+                    usuario: admin
+                    email: admin@empresa.com
+                    rolId: 1
+                    activo: true
+                    intentosFallidos: 0
+                    bloqueadoHasta: null
+                    ultimoAcceso: '2026-09-19T12:00:00.000Z'
+                    createdAt: '2026-01-01T00:00:00.000Z'
+                    updatedAt: '2026-09-19T12:00:00.000Z'
+                    rol: { id: 1, nombre: Administrador }
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Usuarios]
+      operationId: createUsuario
+      summary: Crear usuario
+      description: 'Requiere permiso: usuarios.crear.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombreCompleto, usuario, email, password, rolId]
+              properties:
+                nombreCompleto: { type: string, maxLength: 150, example: Juan Perez }
+                usuario: { type: string, maxLength: 60, example: jperez }
+                email: { type: string, format: email, maxLength: 150, example: jperez@empresa.com }
+                password: { type: string, minLength: 8, maxLength: 200, example: Clave12345 }
+                rolId: { type: integer, example: 2 }
+                activo: { type: boolean, default: true, example: true }
+            example:
+              nombreCompleto: Juan Perez
+              usuario: jperez
+              email: jperez@empresa.com
+              password: Clave12345
+              rolId: 2
+              activo: true
+      responses:
+        '201':
+          description: Usuario creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /usuarios/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Usuarios]
+      operationId: getUsuario
+      summary: Obtener usuario por id
+      description: 'Requiere permiso: usuarios.ver.'
+      responses:
+        '200':
+          description: Usuario encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Usuarios]
+      operationId: updateUsuario
+      summary: Actualizar usuario
+      description: 'Requiere permiso: usuarios.editar. Todos los campos son opcionales.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombreCompleto: { type: string, maxLength: 150, example: Juan Perez Gomez }
+                usuario: { type: string, maxLength: 60, example: jperez }
+                email: { type: string, format: email, maxLength: 150, example: jperez@empresa.com }
+                password: { type: string, minLength: 8, maxLength: 200, example: Clave12345 }
+                rolId: { type: integer, example: 2 }
+                activo: { type: boolean, example: true }
+            example:
+              nombreCompleto: Juan Perez Gomez
+              rolId: 2
+              activo: true
+      responses:
+        '200':
+          description: Usuario actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Usuarios]
+      operationId: deleteUsuario
+      summary: Desactivar usuario (soft delete)
+      description: 'Requiere permiso: usuarios.eliminar. Desactiva el usuario, no lo borra.'
+      responses:
+        '204':
+          description: Usuario desactivado (sin contenido)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /roles:
+    get:
+      tags: [Roles]
+      operationId: listRoles
+      summary: Listar roles
+      description: 'Requiere permiso: roles.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: search
+          in: query
+          required: false
+          schema: { type: string, maxLength: 80, example: admin }
+      responses:
+        '200':
+          description: Lista paginada de roles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolPage'
+              example:
+                data:
+                  - id: 1
+                    nombre: Administrador
+                    descripcion: Acceso total
+                    createdAt: '2026-01-01T00:00:00.000Z'
+                    updatedAt: '2026-01-01T00:00:00.000Z'
+                    permisos: [usuarios.ver, pagos.validar]
+                    usuarioCount: 1
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Roles]
+      operationId: createRol
+      summary: Crear rol
+      description: 'Requiere permiso: roles.gestionar.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre]
+              properties:
+                nombre: { type: string, maxLength: 80, example: Supervisora }
+                descripcion: { type: string, maxLength: 255, nullable: true, example: Supervisa cobradores }
+                permisos:
+                  type: array
+                  items: { type: string }
+                  default: []
+                  example: [pagos.ver_todos, pagos.validar]
+            example:
+              nombre: Supervisora
+              descripcion: Supervisa cobradores
+              permisos: [pagos.ver_todos, pagos.validar]
+      responses:
+        '201':
+          description: Rol creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rol'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /roles/permisos:
+    get:
+      tags: [Roles]
+      operationId: listPermisosCatalog
+      summary: Catalogo de permisos agrupado por modulo
+      description: 'Requiere permiso: roles.ver. Permisos agrupados por prefijo (antes del punto).'
+      responses:
+        '200':
+          description: Catalogo de permisos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        modulo: { type: string, example: pagos }
+                        permisos:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              clave: { type: string, example: pagos.validar }
+                              descripcion: { type: string, nullable: true, example: Validar pagos reportados }
+              example:
+                data:
+                  - modulo: pagos
+                    permisos:
+                      - { clave: pagos.validar, descripcion: Validar pagos reportados }
+                      - { clave: pagos.rechazar, descripcion: Rechazar pagos }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /roles/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Roles]
+      operationId: getRol
+      summary: Obtener rol por id
+      description: 'Requiere permiso: roles.ver.'
+      responses:
+        '200':
+          description: Rol encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rol'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Roles]
+      operationId: updateRol
+      summary: Actualizar rol
+      description: 'Requiere permiso: roles.gestionar.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre: { type: string, maxLength: 80, example: Supervisora General }
+                descripcion: { type: string, maxLength: 255, nullable: true, example: Supervisa todas las zonas }
+                permisos:
+                  type: array
+                  items: { type: string }
+                  example: [pagos.ver_todos, pagos.validar, reportes.ver]
+            example:
+              nombre: Supervisora General
+              permisos: [pagos.ver_todos, pagos.validar, reportes.ver]
+      responses:
+        '200':
+          description: Rol actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rol'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Roles]
+      operationId: deleteRol
+      summary: Eliminar rol
+      description: 'Requiere permiso: roles.gestionar. Falla con 409 si tiene usuarios asignados.'
+      responses:
+        '204':
+          description: Rol eliminado (sin contenido)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /cobradores:
+    get:
+      tags: [Cobradores]
+      operationId: listCobradores
+      summary: Listar cobradores
+      description: 'Requiere permiso: cobradores.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: search
+          in: query
+          required: false
+          schema: { type: string, maxLength: 150, example: Pedro }
+        - name: activo
+          in: query
+          required: false
+          schema: { type: boolean, example: true }
+      responses:
+        '200':
+          description: Lista paginada de cobradores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CobradorPage'
+              example:
+                data:
+                  - id: 1
+                    nombre: Pedro Rojas
+                    codigo: CBR-001
+                    usuarioId: 3
+                    activo: true
+                    createdAt: '2026-01-01T00:00:00.000Z'
+                    updatedAt: '2026-01-01T00:00:00.000Z'
+                    usuario: { id: 3, usuario: jperez }
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Cobradores]
+      operationId: createCobrador
+      summary: Crear cobrador
+      description: 'Requiere permiso: cobradores.gestionar.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre, codigo]
+              properties:
+                nombre: { type: string, maxLength: 150, example: Pedro Rojas }
+                codigo: { type: string, maxLength: 40, example: CBR-001 }
+                usuarioId: { type: integer, nullable: true, example: 3 }
+                activo: { type: boolean, default: true, example: true }
+            example:
+              nombre: Pedro Rojas
+              codigo: CBR-001
+              usuarioId: 3
+              activo: true
+      responses:
+        '201':
+          description: Cobrador creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cobrador'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /cobradores/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Cobradores]
+      operationId: getCobrador
+      summary: Obtener cobrador por id
+      description: 'Requiere permiso: cobradores.ver.'
+      responses:
+        '200':
+          description: Cobrador encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cobrador'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Cobradores]
+      operationId: updateCobrador
+      summary: Actualizar cobrador
+      description: 'Requiere permiso: cobradores.gestionar.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre: { type: string, maxLength: 150, example: Pedro Rojas Diaz }
+                codigo: { type: string, maxLength: 40, example: CBR-001 }
+                usuarioId: { type: integer, nullable: true, example: 3 }
+                activo: { type: boolean, example: true }
+            example:
+              nombre: Pedro Rojas Diaz
+              activo: true
+      responses:
+        '200':
+          description: Cobrador actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cobrador'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Cobradores]
+      operationId: deleteCobrador
+      summary: Desactivar cobrador (soft delete)
+      description: 'Requiere permiso: cobradores.gestionar.'
+      responses:
+        '204':
+          description: Cobrador desactivado (sin contenido)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /bancos:
+    get:
+      tags: [Bancos]
+      operationId: listBancos
+      summary: Listar bancos
+      description: 'Requiere permiso: bancos.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: search
+          in: query
+          required: false
+          schema: { type: string, maxLength: 120, example: Banco }
+      responses:
+        '200':
+          description: Lista paginada de bancos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BancoPage'
+              example:
+                data:
+                  - id: 1
+                    nombre: Banco de Venezuela
+                    codigo: BDV
+                    createdAt: '2026-01-01T00:00:00.000Z'
+                    updatedAt: '2026-01-01T00:00:00.000Z'
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Bancos]
+      operationId: createBanco
+      summary: Crear banco
+      description: 'Requiere permiso: bancos.gestionar.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre, codigo]
+              properties:
+                nombre: { type: string, maxLength: 120, example: Banco de Venezuela }
+                codigo: { type: string, maxLength: 20, example: BDV }
+            example:
+              nombre: Banco de Venezuela
+              codigo: BDV
+      responses:
+        '201':
+          description: Banco creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Banco'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /bancos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Bancos]
+      operationId: getBanco
+      summary: Obtener banco por id
+      description: 'Requiere permiso: bancos.ver.'
+      responses:
+        '200':
+          description: Banco encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Banco'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Bancos]
+      operationId: updateBanco
+      summary: Actualizar banco
+      description: 'Requiere permiso: bancos.gestionar.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre: { type: string, maxLength: 120, example: Banco de Venezuela S.A. }
+                codigo: { type: string, maxLength: 20, example: BDV }
+            example:
+              nombre: Banco de Venezuela S.A.
+      responses:
+        '200':
+          description: Banco actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Banco'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Bancos]
+      operationId: deleteBanco
+      summary: Eliminar banco
+      description: 'Requiere permiso: bancos.gestionar. Falla con 409 si tiene cuentas o pagos asociados.'
+      responses:
+        '204':
+          description: Banco eliminado (sin contenido)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /cuentas:
+    get:
+      tags: [Cuentas]
+      operationId: listCuentas
+      summary: Listar cuentas recaudadoras
+      description: 'Requiere permiso: cuentas.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: search
+          in: query
+          required: false
+          schema: { type: string, maxLength: 120, example: '0102' }
+        - name: bancoId
+          in: query
+          required: false
+          schema: { type: integer, example: 1 }
+        - name: activo
+          in: query
+          required: false
+          schema: { type: boolean, example: true }
+      responses:
+        '200':
+          description: Lista paginada de cuentas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CuentaPage'
+              example:
+                data:
+                  - id: 1
+                    bancoId: 1
+                    numeroCuenta: '0102-0123-45-6789012345'
+                    alias: Cuenta principal
+                    activo: true
+                    createdAt: '2026-01-01T00:00:00.000Z'
+                    updatedAt: '2026-01-01T00:00:00.000Z'
+                    banco: { id: 1, nombre: Banco de Venezuela, codigo: BDV }
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Cuentas]
+      operationId: createCuenta
+      summary: Crear cuenta recaudadora
+      description: 'Requiere permiso: cuentas.gestionar.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bancoId, numeroCuenta]
+              properties:
+                bancoId: { type: integer, example: 1 }
+                numeroCuenta: { type: string, maxLength: 40, example: '0102-0123-45-6789012345' }
+                alias: { type: string, maxLength: 120, nullable: true, example: Cuenta principal }
+                activo: { type: boolean, default: true, example: true }
+            example:
+              bancoId: 1
+              numeroCuenta: '0102-0123-45-6789012345'
+              alias: Cuenta principal
+              activo: true
+      responses:
+        '201':
+          description: Cuenta creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cuenta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /cuentas/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Cuentas]
+      operationId: getCuenta
+      summary: Obtener cuenta por id
+      description: 'Requiere permiso: cuentas.ver.'
+      responses:
+        '200':
+          description: Cuenta encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cuenta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Cuentas]
+      operationId: updateCuenta
+      summary: Actualizar cuenta recaudadora
+      description: 'Requiere permiso: cuentas.gestionar.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bancoId: { type: integer, example: 1 }
+                numeroCuenta: { type: string, maxLength: 40, example: '0102-0123-45-6789012345' }
+                alias: { type: string, maxLength: 120, nullable: true, example: Cuenta operativa }
+                activo: { type: boolean, example: true }
+            example:
+              alias: Cuenta operativa
+              activo: true
+      responses:
+        '200':
+          description: Cuenta actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cuenta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Cuentas]
+      operationId: deleteCuenta
+      summary: Desactivar cuenta (soft delete)
+      description: 'Requiere permiso: cuentas.gestionar.'
+      responses:
+        '204':
+          description: Cuenta desactivada (sin contenido)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /cuentas/{id}/default:
+    put:
+      tags: [Cuentas]
+      operationId: setCuentaDefault
+      summary: Marcar cuenta recaudadora predeterminada
+      description: |
+        Requiere permiso: cuentas.gestionar. Solo se puede marcar una cuenta activa.
+        Actualiza el parametro `pago.cuenta_recaudadora_default` e invalida la cache de
+        configuracion.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Cuenta marcada como predeterminada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cuenta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tipos-pago:
+    get:
+      tags: [Tipos de pago]
+      operationId: listTiposPago
+      summary: Listar tipos de pago
+      description: 'Requiere permiso: tipos_pago.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: search
+          in: query
+          required: false
+          description: Busca por nombre o descripcion
+          schema: { type: string, maxLength: 120, example: Pago }
+        - name: activo
+          in: query
+          required: false
+          description: Filtra por estado activo
+          schema: { type: boolean, example: true }
+      responses:
+        '200':
+          description: Lista paginada de tipos de pago
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TipoPagoPage'
+              example:
+                data:
+                  - id: 1
+                    nombre: Pago Movil
+                    descripcion: Pago movil interbancario
+                    activo: true
+                    orden: 1
+                    createdAt: '2026-01-01T00:00:00.000Z'
+                    updatedAt: '2026-01-01T00:00:00.000Z'
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Tipos de pago]
+      operationId: createTipoPago
+      summary: Crear tipo de pago
+      description: 'Requiere permiso: tipos_pago.gestionar. Falla con 409 si el nombre ya existe.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTipoPagoRequest'
+            example:
+              nombre: Pago Movil
+              descripcion: Pago movil interbancario
+              activo: true
+              orden: 1
+      responses:
+        '201':
+          description: Tipo de pago creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TipoPago'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tipos-pago/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Tipos de pago]
+      operationId: getTipoPago
+      summary: Obtener tipo de pago por id
+      description: 'Requiere permiso: tipos_pago.ver.'
+      responses:
+        '200':
+          description: Tipo de pago encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TipoPago'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Tipos de pago]
+      operationId: updateTipoPago
+      summary: Actualizar tipo de pago
+      description: 'Requiere permiso: tipos_pago.gestionar. Todos los campos son opcionales.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTipoPagoRequest'
+            example:
+              descripcion: Pago movil interbancario y mismo banco
+              orden: 2
+      responses:
+        '200':
+          description: Tipo de pago actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TipoPago'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Tipos de pago]
+      operationId: deleteTipoPago
+      summary: Desactivar tipo de pago (soft delete)
+      description: 'Requiere permiso: tipos_pago.gestionar. Desactiva el tipo; no lo borra.'
+      responses:
+        '204':
+          description: Tipo de pago desactivado (sin contenido)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tipos-pago/{id}/default:
+    put:
+      tags: [Tipos de pago]
+      operationId: setTipoPagoDefault
+      summary: Marcar tipo de pago predeterminado
+      description: |
+        Requiere permiso: tipos_pago.gestionar. Solo se puede marcar un tipo activo.
+        Actualiza el parametro `pago.tipo_pago_default` e invalida la cache de configuracion.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Tipo de pago marcado como predeterminado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TipoPago'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tasas:
+    get:
+      tags: [Tasas]
+      operationId: listTasas
+      summary: Listar tasas de referencia
+      description: 'Requiere permiso: tasas.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: fechaDesde
+          in: query
+          required: false
+          description: Formato YYYY-MM-DD o ISO
+          schema: { type: string, format: date, example: '2026-09-01' }
+        - name: fechaHasta
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-30' }
+      responses:
+        '200':
+          description: Lista paginada de tasas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasaPage'
+              example:
+                data:
+                  - id: 1
+                    fecha: '2026-09-19T00:00:00.000Z'
+                    valor: '36.500000'
+                    fuente: BCV
+                    createdAt: '2026-09-19T00:00:00.000Z'
+                    updatedAt: '2026-09-19T00:00:00.000Z'
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Tasas]
+      operationId: createTasa
+      summary: Crear o reemplazar la tasa de un dia
+      description: |
+        Requiere permiso: tasas.gestionar. Es un upsert por `fecha` (una tasa por dia).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fecha, valor]
+              properties:
+                fecha: { type: string, format: date, example: '2026-09-19' }
+                valor:
+                  type: string
+                  description: Decimal con hasta 6 decimales (se envia como string)
+                  pattern: '^\d+(?:\.\d{1,6})?$'
+                  example: '36.500000'
+                fuente: { type: string, maxLength: 120, nullable: true, example: BCV }
+            example:
+              fecha: '2026-09-19'
+              valor: '36.500000'
+              fuente: BCV
+      responses:
+        '201':
+          description: Tasa creada o reemplazada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tasa'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tasas/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Tasas]
+      operationId: getTasa
+      summary: Obtener tasa por id
+      description: 'Requiere permiso: tasas.ver.'
+      responses:
+        '200':
+          description: Tasa encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tasa'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Tasas]
+      operationId: updateTasa
+      summary: Actualizar tasa
+      description: 'Requiere permiso: tasas.gestionar.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fecha: { type: string, format: date, example: '2026-09-20' }
+                valor: { type: string, pattern: '^\d+(?:\.\d{1,6})?$', example: '37.100000' }
+                fuente: { type: string, maxLength: 120, nullable: true, example: BCV }
+            example:
+              valor: '37.100000'
+              fuente: BCV
+      responses:
+        '200':
+          description: Tasa actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tasa'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Tasas]
+      operationId: deleteTasa
+      summary: Eliminar tasa
+      description: 'Requiere permiso: tasas.gestionar.'
+      responses:
+        '204':
+          description: Tasa eliminada (sin contenido)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tasas-bcv/actual:
+    get:
+      tags: [Tasa BCV]
+      operationId: getTasaBcvActual
+      summary: Tasa BCV actual
+      description: |
+        Requiere autenticacion (Bearer), sin permiso especifico. Devuelve la ultima tasa
+        almacenada o `null` si todavia no hay ninguna. Es informativa y nunca alimenta
+        la tasa derivada de un pago.
+      responses:
+        '200':
+          description: Ultima tasa BCV almacenada (o null)
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+                allOf:
+                  - $ref: '#/components/schemas/TasaBcv'
+              example:
+                id: 5
+                apiId: 5f2c9b7a1d3e4f60718293a4b5c6d7e8
+                fecha: '2026-09-19T00:00:00.000Z'
+                usd: '36.500000'
+                fuente: BCV
+                fechaApi: '2026-09-19T12:00:00.000Z'
+                createdAt: '2026-09-19T12:00:05.000Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tasas-bcv/historial:
+    get:
+      tags: [Tasa BCV]
+      operationId: getTasaBcvHistorial
+      summary: Historial de la tasa BCV
+      description: 'Requiere permiso: auditoria.ver. Lista paginada, mas reciente primero.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: fechaDesde
+          in: query
+          required: false
+          description: Formato YYYY-MM-DD o ISO
+          schema: { type: string, format: date, example: '2026-09-01' }
+        - name: fechaHasta
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-30' }
+      responses:
+        '200':
+          description: Lista paginada del historico de la tasa BCV
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasaBcvPage'
+              example:
+                data:
+                  - id: 5
+                    apiId: 5f2c9b7a1d3e4f60718293a4b5c6d7e8
+                    fecha: '2026-09-19T00:00:00.000Z'
+                    usd: '36.500000'
+                    fuente: BCV
+                    fechaApi: '2026-09-19T12:00:00.000Z'
+                    createdAt: '2026-09-19T12:00:05.000Z'
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tasas-bcv/job:
+    get:
+      tags: [Tasa BCV]
+      operationId: getBcvJob
+      summary: Estado del job de sincronizacion BCV
+      description: 'Requiere permiso: config.ver.'
+      responses:
+        '200':
+          description: Estado del job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BcvJobEstado'
+              example:
+                habilitado: true
+                intervaloMinutos: 60
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Tasa BCV]
+      operationId: updateBcvJob
+      summary: Activar o desactivar el job de sincronizacion BCV
+      description: |
+        Requiere permiso: config.editar. Persiste el parametro `bcv.job_habilitado` e
+        invalida la cache de configuracion; el job lee el flag en cada ciclo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BcvJobToggleRequest'
+            example:
+              habilitado: false
+      responses:
+        '200':
+          description: Job actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BcvJobEstado'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tasas-bcv/sincronizar:
+    post:
+      tags: [Tasa BCV]
+      operationId: sincronizarTasaBcv
+      summary: Sincronizar manualmente la tasa BCV
+      description: |
+        Requiere permiso: config.editar. Consulta la API externa una vez y guarda la tasa
+        solo si es nueva (deduplicada por `apiId`). Nunca responde 5xx por un fallo externo:
+        los errores de red o de parseo se devuelven en el cuerpo.
+      responses:
+        '200':
+          description: Resultado de la sincronizacion
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  insertada: { type: boolean, example: true }
+                  motivo: { type: string, enum: [duplicado, error], nullable: true, example: duplicado }
+                  tasa:
+                    type: object
+                    nullable: true
+                    allOf:
+                      - $ref: '#/components/schemas/TasaBcv'
+                  error: { type: string, nullable: true, example: Error de red }
+              example:
+                insertada: true
+                tasa:
+                  id: 5
+                  apiId: 5f2c9b7a1d3e4f60718293a4b5c6d7e8
+                  fecha: '2026-09-19T00:00:00.000Z'
+                  usd: '36.500000'
+                  fuente: BCV
+                  fechaApi: '2026-09-19T12:00:00.000Z'
+                  createdAt: '2026-09-19T12:00:05.000Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /parametros:
+    get:
+      tags: [Parametros]
+      operationId: listParametros
+      summary: Listar parametros de configuracion
+      description: 'Requiere permiso: config.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: search
+          in: query
+          required: false
+          schema: { type: string, maxLength: 100, example: tolerancia }
+      responses:
+        '200':
+          description: Lista paginada de parametros
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParametroPage'
+              example:
+                data:
+                  - id: 1
+                    clave: tolerancia_monto_bs
+                    valor: '0.01'
+                    descripcion: Tolerancia de monto en bolivares
+                    updatedAt: '2026-09-19T00:00:00.000Z'
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /parametros/bulk:
+    patch:
+      tags: [Parametros]
+      operationId: bulkUpdateParametros
+      summary: Actualizar varios parametros
+      description: 'Requiere permiso: config.editar. Actualiza en una sola transaccion.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parametros]
+              properties:
+                parametros:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [clave, valor]
+                    properties:
+                      clave: { type: string, maxLength: 100, example: tolerancia_monto_bs }
+                      valor: { type: string, maxLength: 255, example: '0.05' }
+            example:
+              parametros:
+                - { clave: tolerancia_monto_bs, valor: '0.05' }
+                - { clave: umbral_antiguedad_dias, valor: '30' }
+      responses:
+        '200':
+          description: Parametros actualizados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Parametro'
+              example:
+                data:
+                  - id: 1
+                    clave: tolerancia_monto_bs
+                    valor: '0.05'
+                    descripcion: Tolerancia de monto en bolivares
+                    updatedAt: '2026-09-19T00:00:00.000Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /parametros/{clave}:
+    parameters:
+      - name: clave
+        in: path
+        required: true
+        description: Clave del parametro
+        schema: { type: string, maxLength: 100, example: tolerancia_monto_bs }
+    put:
+      tags: [Parametros]
+      operationId: updateParametro
+      summary: Actualizar un parametro por clave
+      description: 'Requiere permiso: config.editar.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [valor]
+              properties:
+                valor: { type: string, maxLength: 255, example: '0.05' }
+                descripcion: { type: string, maxLength: 255, nullable: true, example: Tolerancia de monto en bolivares }
+            example:
+              valor: '0.05'
+      responses:
+        '200':
+          description: Parametro actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Parametro'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /catalogos/form-pago:
+    get:
+      tags: [Catalogos]
+      operationId: getCatalogoFormPago
+      summary: Catalogos para el formulario de pago
+      description: |
+        Requiere autenticacion (Bearer), sin permiso especifico. Devuelve bancos, cuentas
+        recaudadoras y tipos de pago activos, mas los predeterminados configurados, en una
+        sola llamada (principio de minimo privilegio).
+      responses:
+        '200':
+          description: Catalogos activos y valores predeterminados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bancos:
+                    type: array
+                    items: { $ref: '#/components/schemas/BancoResumen' }
+                  cuentasRecaudadoras:
+                    type: array
+                    items: { $ref: '#/components/schemas/CuentaResumen' }
+                  tiposPago:
+                    type: array
+                    items: { $ref: '#/components/schemas/TipoPagoResumen' }
+                  defaults:
+                    type: object
+                    properties:
+                      cuentaRecaudadoraId: { type: integer, nullable: true, example: 1 }
+                      tipoPagoId: { type: integer, nullable: true, example: 1 }
+                  reglas:
+                    type: object
+                    properties:
+                      bancoOrigenObligatorio:
+                        type: boolean
+                        description: >-
+                          Indica si el banco de origen es obligatorio al reportar un pago
+                          (parametro pago.banco_origen_obligatorio).
+                        example: true
+              example:
+                bancos:
+                  - { id: 1, nombre: Banco de Venezuela, codigo: BDV }
+                cuentasRecaudadoras:
+                  - id: 1
+                    numeroCuenta: '0102-0123-45-6789012345'
+                    alias: Cuenta principal
+                    banco: { id: 1, nombre: Banco de Venezuela, codigo: BDV }
+                tiposPago:
+                  - { id: 1, nombre: Pago Movil, descripcion: Pago movil interbancario }
+                defaults:
+                  cuentaRecaudadoraId: 1
+                  tipoPagoId: 1
+                reglas:
+                  bancoOrigenObligatorio: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /pagos:
+    post:
+      tags: [Pagos]
+      operationId: reportarPago
+      summary: Reportar un pago
+      description: |
+        Requiere permiso: pagos.reportar. La tasa se deriva de montoBs / montoUsd
+        (nunca se acepta como entrada). `cobradorId` solo lo pueden usar usuarios
+        con permiso pagos.ver_todos para reportar a nombre de un cobrador.
+        `bancoOrigenId` es opcional: si el parametro `pago.banco_origen_obligatorio`
+        esta activo ('1', valor por defecto) y no se envia, el API responde 400 con
+        "El banco de origen es obligatorio.".
+
+        Los montos `montoBs` y `montoUsd` deben resolver a un decimal finito y
+        estrictamente positivo. Un valor no numerico, cero o negativo responde **400**
+        con "El monto debe ser un numero positivo" (regla compartida con
+        `PUT /pagos/{id}`), evitando que el error derive en un 500.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportarPagoRequest'
+            example:
+              fechaPago: '2026-09-19'
+              fechaDocumento: '2026-08-01'
+              referencia: '12345678'
+              bancoOrigenId: 1
+              cuentaRecaudadoraId: 1
+              montoBs: '3600.00'
+              montoUsd: '20.00'
+              cliente: Juan Perez
+              concepto: Pago cuota mensual
+              tipoCobro: nuevo
+              tipoPagoId: 1
+              observaciones: Reportado en ruta
+              cobradorId: 1
+      responses:
+        '201':
+          description: Pago reportado (estado pendiente)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pago'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Pagos]
+      operationId: listarPagos
+      summary: Listar pagos reportados
+      description: |
+        Requiere permiso: pagos.ver_todos o pagos.ver_propios. El aislamiento por
+        cobrador se aplica en la capa de datos cuando el usuario no tiene pagos.ver_todos.
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: fechaDesde
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-01' }
+        - name: fechaHasta
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-30' }
+        - name: cobradorId
+          in: query
+          required: false
+          schema: { type: integer, example: 1 }
+        - name: bancoOrigenId
+          in: query
+          required: false
+          schema: { type: integer, example: 1 }
+        - name: cuentaRecaudadoraId
+          in: query
+          required: false
+          schema: { type: integer, example: 1 }
+        - name: estado
+          in: query
+          required: false
+          schema: { type: string, enum: [pendiente, validado, rechazado, duplicado], example: pendiente }
+        - name: tipoCobro
+          in: query
+          required: false
+          schema: { type: string, enum: [nuevo, viejo], example: nuevo }
+        - name: tipoPagoId
+          in: query
+          required: false
+          description: Filtra por tipo de pago
+          schema: { type: integer, example: 1 }
+        - name: referencia
+          in: query
+          required: false
+          schema: { type: string, maxLength: 60, example: '12345678' }
+        - name: montoMin
+          in: query
+          required: false
+          schema: { type: number, example: 10 }
+        - name: montoMax
+          in: query
+          required: false
+          schema: { type: number, example: 100 }
+        - name: soloRevisar
+          in: query
+          required: false
+          description: Filtra pagos con clasificacion a revisar
+          schema: { type: string, enum: ['true', 'false'], example: 'true' }
+      responses:
+        '200':
+          description: Lista paginada de pagos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagoPage'
+              example:
+                data:
+                  - id: 10
+                    fechaPago: '2026-09-19T00:00:00.000Z'
+                    referencia: '12345678'
+                    montoBs: '3600.00'
+                    montoUsd: '20.00'
+                    tasa: '180.000000'
+                    cliente: Juan Perez
+                    concepto: Pago cuota mensual
+                    tipoPagoId: 1
+                    soporteUrl: /uploads/1699999999999-comprobante.pdf
+                    tipoCobro: nuevo
+                    tipoCobroDerivado: nuevo
+                    revisarClasificacion: false
+                    observaciones: null
+                    estado: pendiente
+                    motivoRechazo: null
+                    validadoAt: null
+                    createdAt: '2026-09-19T14:00:00.000Z'
+                    cobradorId: 1
+                    bancoOrigenId: 1
+                    cuentaRecaudadoraId: 1
+                    movimientoBancoId: null
+                    cobrador: { id: 1, nombre: Pedro Rojas, codigo: CBR-001 }
+                    tipoPago: { id: 1, nombre: Pago Movil }
+                    bancoOrigen: { id: 1, nombre: Banco de Venezuela, codigo: BDV }
+                    cuentaRecaudadora: { id: 1, numeroCuenta: '0102-0123-45-6789012345', alias: Cuenta principal, banco: { id: 1, nombre: Banco de Venezuela } }
+                    movimientoBanco: null
+                    validador: null
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /pagos/validar-lote:
+    post:
+      tags: [Conciliacion]
+      operationId: validarLote
+      summary: Validar un lote de pagos
+      description: |
+        Requiere permiso: pagos.validar_lote. Valida pares pago/movimiento en una
+        transaccion. Los items fallidos se devuelven en `errores`, el resto se procesa.
+        CR-001: si un pago coincide por referencia + monto en Bs con un movimiento YA
+        conciliado con otro pago (posible duplicado, misma cuenta recaudadora y sin
+        ventana de fecha), NO se valida y se reporta en `errores` con un motivo que
+        contiene "posible duplicado"; el pago queda `pendiente` para validacion manual.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [pagoReportadoId, movimientoBancoId]
+                    properties:
+                      pagoReportadoId: { type: integer, example: 10 }
+                      movimientoBancoId: { type: integer, example: 25 }
+            example:
+              items:
+                - { pagoReportadoId: 10, movimientoBancoId: 25 }
+                - { pagoReportadoId: 11, movimientoBancoId: 26 }
+      responses:
+        '200':
+          description: Resultado de la validacion por lote
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  procesados: { type: integer, example: 1 }
+                  errores:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        pagoReportadoId: { type: integer, example: 11 }
+                        motivo: { type: string, example: Movimiento no disponible }
+              example:
+                procesados: 1
+                errores:
+                  - pagoReportadoId: 11
+                    motivo: El pago coincide con un movimiento ya conciliado con otro pago (posible duplicado)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /pagos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Pagos]
+      operationId: obtenerPago
+      summary: Obtener pago por id
+      description: 'Requiere permiso: pagos.ver_todos o pagos.ver_propios (con aislamiento por cobrador).'
+      responses:
+        '200':
+          description: Pago encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pago'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Pagos]
+      operationId: editarPago
+      summary: Editar pago reportado (incluye pagos validados)
+      description: |
+        Permisos: la ruta exige `pagos.reportar` **o** `pagos.editar`; sin ninguno
+        de los dos responde **403** en el guard. Un pago en estado `pendiente` se
+        edita con cualquiera de esos dos permisos (el cobrador sigue editando los
+        propios). Editar un pago `validado` exige ADEMAS el permiso elevado
+        `pagos.editar`; con solo `pagos.reportar` responde **403** desde el servicio.
+        `pagos.ver_todos` es un permiso de **solo lectura** y NO habilita la edicion.
+        Los pagos `rechazado` y `duplicado` no son editables: responden **409**. El
+        permiso elevado se verifica en el servicio contra el estado leido dentro de
+        la transaccion, de modo que la edicion del cobrador sobre sus propios pagos
+        pendientes no se rompe.
+
+        Edicion de un pago `validado` (en caliente, dentro de una transaccion): se
+        reevalua el vinculo con el movimiento bancario usando los valores NUEVOS
+        (referencia, monto dentro de `match.amount_tolerance_bs`, fecha dentro de la
+        ventana de `match.date_window_days` y misma cuenta recaudadora). Si el
+        vinculo se mantiene, se recalcula `conciliaciones.diferenciaBs` y se registra
+        la auditoria (`datosAntes`/`datosDespues`) en la MISMA transaccion; el pago
+        conserva `estado = 'validado'`. Si la edicion rompe el vinculo, responde
+        **409** con el movimiento en conflicto y no modifica nada: primero hay que
+        revertir la validacion (`POST /pagos/{id}/revertir`). Nuevos endpoints: 0.
+
+        Si cambian los montos, se recalcula la tasa; ambos montos deben resolver a un
+        decimal finito y estrictamente positivo (`El monto debe ser un numero positivo`,
+        **400**), la misma regla que aplica `POST /pagos`. Actualizacion parcial: un
+        `bancoOrigenId` ausente deja el banco guardado intacto, mientras que `null`
+        lo limpia. La regla de obligatoriedad se evalua sobre el valor resultante:
+        con `pago.banco_origen_obligatorio` activo (`'1'`) un pago sin banco
+        responde 400 "El banco de origen es obligatorio.".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                referencia: { type: string, maxLength: 60, example: '87654321' }
+                bancoOrigenId:
+                  type: integer
+                  nullable: true
+                  description: >-
+                    Banco de origen opcional. Ausente deja el banco actual sin cambios;
+                    null lo limpia. Si pago.banco_origen_obligatorio esta activo ('1') y
+                    el valor resultante queda nulo, responde 400.
+                  example: 1
+                cuentaRecaudadoraId: { type: integer, example: 1 }
+                montoBs: { type: string, example: '4000.00' }
+                montoUsd: { type: string, example: '22.00' }
+                fechaPago: { type: string, format: date, example: '2026-09-19' }
+                cliente: { type: string, maxLength: 180, example: Juan Perez }
+                concepto: { type: string, maxLength: 255, example: Pago cuota mensual }
+                tipoCobro: { type: string, enum: [nuevo, viejo], example: nuevo }
+                tipoPagoId:
+                  type: integer
+                  description: >-
+                    Tipo de pago opcional. Debe OMITIRSE para no modificar el valor actual;
+                    enviar null responde 400 (a diferencia de bancoOrigenId, que si acepta null
+                    para limpiarlo).
+                  example: 1
+                observaciones: { type: string, maxLength: 2000, example: Corregido por el cobrador }
+              example:
+                referencia: '87654321'
+                montoBs: '4000.00'
+                montoUsd: '22.00'
+      responses:
+        '200':
+          description: Pago actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pago'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            El usuario no tiene `pagos.reportar` ni `pagos.editar` (guard de la ruta),
+            o el pago esta `validado` y carece del permiso elevado `pagos.editar`
+            (verificado en el servicio contra el estado fresco).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error:
+                  code: forbidden
+                  message: 'No tiene permiso para editar un pago validado. Se requiere el permiso "pagos.editar".'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            El pago esta `rechazado`/`duplicado` (no editable) o la edicion rompe el
+            vinculo con el movimiento bancario vinculado. En ambos casos no se
+            modifica nada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                estadoNoEditable:
+                  value:
+                    error:
+                      code: conflict
+                      message: 'No se puede editar un pago en estado "rechazado"'
+                vinculoRoto:
+                  value:
+                    error:
+                      code: conflict
+                      message: 'La edicion rompe la conciliacion con el movimiento bancario #42 (referencia 120012345678, Bs 4000.00). Revierta la validacion antes de editar.'
+                      details: { movimientoBancoId: 42, referencia: '120012345678' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Pagos]
+      operationId: eliminarPago
+      summary: Eliminar pago reportado no validado
+      description: |
+        Requiere permiso: pagos.eliminar. Es un borrado FISICO (hard delete) y solo se
+        permite mientras el pago NO este `validado` (es decir, en estado `pendiente`,
+        `rechazado` o `duplicado`). Un pago no validado no tiene fila en `conciliaciones`
+        ni `movimientoBancoId`, por lo que no deja referencias huerfanas.
+        Responde 409 si el pago esta `validado`: primero debe revertirse la validacion
+        (`POST /pagos/{id}/revertir`). El aislamiento por cobrador aplica: un usuario sin
+        pagos.ver_todos solo alcanza sus propios pagos.
+        La instantanea completa del registro se escribe en la auditoria (entidad
+        `pagos_reportados`, accion `borrar`, con `datosAntes`) dentro de la MISMA
+        transaccion que el borrado, de modo que ambos succeed o fallan juntos.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Pago eliminado (sin contenido)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /pagos/{id}/soporte:
+    post:
+      tags: [Pagos]
+      operationId: subirSoportePago
+      summary: Subir comprobante de un pago
+      description: |
+        Requiere permiso: pagos.reportar o pagos.editar (con aislamiento por cobrador).
+        Multipart: imagen o PDF, max 5 MB. El campo aceptado es `soporte` (tambien se
+        aceptan `archivo` o `file`). Solo se permite mientras el pago esta en estado
+        `pendiente`.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [soporte]
+              properties:
+                soporte:
+                  type: string
+                  format: binary
+                  description: Imagen o PDF del comprobante (max 5 MB)
+      responses:
+        '200':
+          description: Comprobante cargado; devuelve el pago actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pago'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /pagos/{id}/coincidencias:
+    get:
+      tags: [Conciliacion]
+      operationId: obtenerCoincidencias
+      summary: Buscar coincidencias bancarias
+      description: |
+        Requiere permiso: pagos.validar. Devuelve los movimientos bancarios
+        candidatos puntuados (0..100) para el pago indicado. `data` conserva la
+        forma original (array de coincidencias). `duplicado` es una senal ADITIVA y
+        nullable: cuando NO es `null`, el pago coincide por referencia + monto en Bs
+        con un movimiento bancario YA conciliado con OTRO pago (misma cuenta
+        recaudadora, sin ventana de fecha), por lo que la validacion automatica no
+        procede (ver `POST /pagos/{id}/validar`).
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Coincidencias encontradas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Coincidencia' }
+                  duplicado:
+                    description: >-
+                      Senal de duplicado (aditiva): un movimiento ya conciliado con
+                      otro pago que coincide por referencia + monto en Bs, o `null`
+                      si el pago no es duplicado.
+                    nullable: true
+                    allOf:
+                      - $ref: '#/components/schemas/DuplicadoInfo'
+              example:
+                data:
+                  - movimiento: { id: 25, referencia: '12345678', montoBs: '3600.00', fechaEjecucion: '2026-09-19T00:00:00.000Z' }
+                    puntaje: 90
+                    referenciaExacta: true
+                    coincidenciaSufijo: false
+                    diferenciaMontoBs: '0.00'
+                    diferenciaDias: 0
+                duplicado: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /pagos/{id}/validar:
+    post:
+      tags: [Conciliacion]
+      operationId: validarPago
+      summary: Validar pago contra un movimiento
+      description: |
+        Requiere permiso: pagos.validar. Si se omite `movimientoBancoId`, se usa la
+        mejor coincidencia automatica: el contraste de referencia usa el ultimo
+        `match.reference_suffix` (8) de la referencia reportada, o sus propios digitos
+        si es mas corta, con un minimo de 4 digitos (una referencia con menos de 4
+        digitos ya no matchea por sufijo, solo por igualdad exacta); exige ademas el
+        monto en Bs dentro de `match.amount_tolerance_bs` y la fecha dentro de
+        `match.date_window_days`. Marca el pago como `validado` y el movimiento como
+        `conciliado`.
+        CR-001: si el pago coincide con un movimiento YA conciliado con otro pago
+        (posible duplicado: misma cuenta recaudadora y referencia + monto en Bs, SIN
+        ventana de fecha), la via automatica responde **409** y NO valida: el pago
+        permanece `pendiente` y debe resolverse manualmente enviando el
+        `movimientoBancoId`. La via manual (con `movimientoBancoId`) no se ve afectada.
+        Ejemplo de request: `POST /api/pagos/10/validar`.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                movimientoBancoId:
+                  type: integer
+                  description: Movimiento bancario a conciliar (opcional)
+                  example: 25
+            example:
+              movimientoBancoId: 25
+      responses:
+        '200':
+          description: Pago validado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pago'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            Validacion automatica (sin `movimientoBancoId`) y el pago coincide con un
+            movimiento ya conciliado con otro pago (posible duplicado): no se valida y
+            el pago queda `pendiente` para validacion manual. Tambien responde 409 si
+            el pago o el movimiento ya fueron procesados.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error:
+                  code: conflict
+                  message: >-
+                    El pago coincide con un movimiento bancario ya conciliado con otro
+                    pago. No se puede validar automaticamente: seleccione manualmente
+                    el movimiento para validarlo.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /pagos/{id}/rechazar:
+    post:
+      tags: [Conciliacion]
+      operationId: rechazarPago
+      summary: Rechazar pago reportado
+      description: 'Requiere permiso: pagos.rechazar. El motivo es obligatorio (minimo 3 caracteres).'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [motivoRechazo]
+              properties:
+                motivoRechazo: { type: string, minLength: 3, maxLength: 1000, example: Referencia no encontrada en el extracto }
+            example:
+              motivoRechazo: Referencia no encontrada en el extracto
+      responses:
+        '200':
+          description: Pago rechazado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pago'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /pagos/{id}/duplicado:
+    post:
+      tags: [Conciliacion]
+      operationId: marcarDuplicado
+      summary: Marcar pago como duplicado
+      description: 'Requiere permiso: pagos.marcar_duplicado.'
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Pago marcado como duplicado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pago'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /pagos/{id}/revertir:
+    post:
+      tags: [Pagos]
+      operationId: revertirPago
+      summary: Revertir la validacion de un pago
+      description: |
+        Requiere permiso: pagos.revertir_validacion. Es la operacion INVERSA exacta de
+        `POST /pagos/{id}/validar` y solo se permite mientras el pago esta `validado`
+        (409 si no lo esta). Dentro de una sola transaccion: (a) elimina la fila de
+        `conciliaciones`, (b) devuelve el movimiento bancario enlazado a `no_conciliado`
+        para que pueda conciliarse de nuevo, y (c) reinicia el pago al estado destino,
+        limpiando `movimientoBancoId`, `validadoPor` y `validadoAt` (y fijando o
+        limpiando `motivoRechazo` segun corresponda). Se registran en auditoria las
+        instantaneas anteriores y posteriores.
+        El cuerpo exige `estado` (`pendiente` o `rechazado`); `motivoRechazo` es
+        obligatorio (minimo 3, maximo 1000 caracteres) cuando `estado` es `rechazado`
+        y no debe enviarse cuando `estado` es `pendiente`.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevertirPagoRequest'
+            example:
+              estado: rechazado
+              motivoRechazo: Validacion revertida por error de conciliacion
+      responses:
+        '200':
+          description: Pago revertido; devuelve el pago actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pago'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /movimientos:
+    get:
+      tags: [Movimientos]
+      operationId: listarMovimientos
+      summary: Listar movimientos bancarios
+      description: 'Requiere permiso: movimientos.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: fechaDesde
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-01' }
+        - name: fechaHasta
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-30' }
+        - name: cuentaRecaudadoraId
+          in: query
+          required: false
+          schema: { type: integer, example: 1 }
+        - name: loteImportacionId
+          in: query
+          required: false
+          schema: { type: integer, example: 3 }
+        - name: estadoConciliacion
+          in: query
+          required: false
+          schema: { type: string, enum: [no_conciliado, conciliado], example: no_conciliado }
+        - name: referencia
+          in: query
+          required: false
+          schema: { type: string, maxLength: 60, example: '12345678' }
+      responses:
+        '200':
+          description: Lista paginada de movimientos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MovimientoPage'
+              example:
+                data:
+                  - id: 25
+                    referencia: '12345678'
+                    montoBs: '3600.00'
+                    fechaEjecucion: '2026-09-19T00:00:00.000Z'
+                    estadoConciliacion: no_conciliado
+                    createdAt: '2026-09-19T00:00:00.000Z'
+                    cuentaRecaudadoraId: 1
+                    loteImportacionId: 3
+                    cuentaRecaudadora: { id: 1, numeroCuenta: '0102-0123-45-6789012345', alias: Cuenta principal, banco: { id: 1, nombre: Banco de Venezuela, codigo: BDV } }
+                    lote: { id: 3, nombreArchivo: extracto-septiembre.xlsx, createdAt: '2026-09-19T00:00:00.000Z' }
+                    pago: null
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /movimientos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Movimientos]
+      operationId: obtenerMovimiento
+      summary: Obtener movimiento bancario por id
+      description: 'Requiere permiso: movimientos.ver. Incluye la conciliacion asociada si existe.'
+      responses:
+        '200':
+          description: Movimiento encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MovimientoDetalle'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /importacion/plantilla:
+    get:
+      tags: [Importacion]
+      operationId: descargarPlantillaImportacion
+      summary: Descargar plantilla de importacion bancaria (.xlsx)
+      description: |
+        Requiere permiso: movimientos.importar. Devuelve un archivo Excel (.xlsx) descargable
+        con la hoja `Movimientos`: la fila 1 es el encabezado en negrita
+        (`Referencia` | `Monto en Bs` | `Fecha de ejecucion`) y la fila 2 es una unica fila de
+        ejemplo (`EJEMPLO-0000` | `0,01` | `01/01/2000`). La fila de ejemplo debe reemplazarse o
+        eliminarse antes de importar: los movimientos importados no se pueden eliminar.
+      responses:
+        '200':
+          description: Archivo Excel (.xlsx) con la plantilla de importacion
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+              description: 'attachment; filename="plantilla-importacion-bancaria.xlsx"'
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /importacion/preview:
+    post:
+      tags: [Importacion]
+      operationId: previewImportacion
+      summary: Previsualizar extracto bancario
+      description: |
+        Requiere permiso: movimientos.importar. Rate limit 30 / 10 min.
+        Archivos aceptados: .xlsx, .xls, .csv (max 10 MB). Devuelve las primeras 20 filas.
+        Ejemplo de request: `POST /api/importacion/preview?cuentaRecaudadoraId=1`.
+      parameters:
+        - name: cuentaRecaudadoraId
+          in: query
+          required: true
+          schema: { type: integer, example: 1 }
+        - name: primeraFilaEsEncabezado
+          in: query
+          required: false
+          schema: { type: string, enum: ['true', 'false'], default: 'false', example: 'true' }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archivo]
+              properties:
+                archivo:
+                  type: string
+                  format: binary
+                  description: Archivo del extracto bancario (.xlsx, .xls o .csv)
+      responses:
+        '200':
+          description: Previsualizacion del archivo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  filasTotales: { type: integer, example: 120 }
+                  erroresDeteccion: { type: integer, example: 2 }
+                  filas:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PreviewFila'
+                  errores:
+                    type: array
+                    items: { $ref: '#/components/schemas/RowError' }
+              example:
+                filasTotales: 120
+                erroresDeteccion: 2
+                filas:
+                  - { fila: 2, referencia: '12345678', montoBs: '3600.00', fechaEjecucion: '2026-09-19T00:00:00.000Z' }
+                errores:
+                  - { fila: 5, motivo: 'Monto en bolivares invalido: "ABC"', raw: ['999', 'ABC', '19/09/2026'] }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /importacion/confirmar:
+    post:
+      tags: [Importacion]
+      operationId: confirmarImportacion
+      summary: Confirmar importacion de extracto
+      description: |
+        Requiere permiso: movimientos.importar. Rate limit 30 / 10 min.
+        Inserta los movimientos en lotes; las filas con error o duplicadas se
+        reportan sin abortar la importacion.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archivo, cuentaRecaudadoraId]
+              properties:
+                archivo:
+                  type: string
+                  format: binary
+                  description: Archivo del extracto bancario (.xlsx, .xls o .csv)
+                cuentaRecaudadoraId:
+                  type: string
+                  description: Id de la cuenta recaudadora (campo de formulario)
+                  example: '1'
+                primeraFilaEsEncabezado:
+                  type: string
+                  enum: ['true', 'false']
+                  default: 'false'
+                  example: 'true'
+      responses:
+        '201':
+          description: Importacion confirmada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResultado'
+              example:
+                loteId: 3
+                nombreArchivo: extracto-septiembre.xlsx
+                filasTotales: 120
+                insertadas: 116
+                duplicadas: 2
+                conError: 2
+                detalleErrores:
+                  - { fila: 5, motivo: 'Monto en bolivares invalido: "ABC"', raw: ['999', 'ABC', '19/09/2026'] }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /importacion/lotes:
+    get:
+      tags: [Importacion]
+      operationId: listarLotes
+      summary: Listar lotes de importacion
+      description: 'Requiere permiso: movimientos.importar o movimientos.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+      responses:
+        '200':
+          description: Lista paginada de lotes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LotePage'
+              example:
+                data:
+                  - id: 3
+                    usuarioId: 1
+                    nombreArchivo: extracto-septiembre.xlsx
+                    filasTotales: 120
+                    insertadas: 116
+                    duplicadas: 2
+                    conError: 2
+                    detalleErrores: null
+                    createdAt: '2026-09-19T00:00:00.000Z'
+                    usuario: { id: 1, usuario: admin, nombreCompleto: Administrador General }
+                    _count: { movimientos: 116 }
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /importacion/lotes/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Importacion]
+      operationId: obtenerLote
+      summary: Obtener lote de importacion por id
+      description: 'Requiere permiso: movimientos.importar o movimientos.ver.'
+      responses:
+        '200':
+          description: Lote encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoteImportacion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /importacion/lotes/{id}/errores:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Importacion]
+      operationId: obtenerErroresLote
+      summary: Descargar detalle de errores del lote (CSV)
+      description: 'Requiere permiso: movimientos.importar. Devuelve un archivo CSV de texto.'
+      responses:
+        '200':
+          description: CSV de errores del lote
+          content:
+            text/csv:
+              schema:
+                type: string
+              example: |
+                fila,motivo,columnas
+                5,"Monto en bolivares invalido: ""ABC""","999 | ABC | 19/09/2026"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /gastos:
+    get:
+      tags: [Gastos]
+      operationId: listarGastos
+      summary: Listar gastos
+      description: 'Requiere permiso: gastos.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: fechaDesde
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-01' }
+        - name: fechaHasta
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-30' }
+        - name: categoria
+          in: query
+          required: false
+          schema: { type: string, maxLength: 100, example: Transporte }
+        - name: autorizadoPor
+          in: query
+          required: false
+          schema: { type: string, maxLength: 180, example: Gerencia }
+        - name: registradoPor
+          in: query
+          required: false
+          schema: { type: integer, example: 1 }
+      responses:
+        '200':
+          description: Lista paginada de gastos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GastoPage'
+              example:
+                data:
+                  - id: 7
+                    fecha: '2026-09-15T00:00:00.000Z'
+                    montoBs: '1800.00'
+                    montoUsd: '10.00'
+                    tasa: '180.000000'
+                    movimientoBancoId: null
+                    referencia: 'GASTO-001'
+                    descripcion: Transporte a zona norte
+                    categoria: Transporte
+                    autorizadoPor: Gerencia
+                    registradoPor: 1
+                    soporteUrl: /uploads/1699999999999-factura.pdf
+                    createdAt: '2026-09-15T00:00:00.000Z'
+                    updatedAt: '2026-09-15T00:00:00.000Z'
+                    registrador: { id: 1, nombreCompleto: Administrador General, usuario: admin }
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Gastos]
+      operationId: crearGasto
+      summary: Crear gasto
+      description: 'Requiere permiso: gastos.crear. La tasa se deriva de montoBs / montoUsd.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fecha, montoBs, montoUsd, descripcion, categoria, autorizadoPor]
+              properties:
+                fecha: { type: string, description: 'Fecha (ISO o YYYY-MM-DD)', example: '2026-09-15' }
+                montoBs: { type: string, pattern: '^\d+(\.\d{1,2})?$', example: '1800.00' }
+                montoUsd: { type: string, pattern: '^\d+(\.\d{1,2})?$', example: '10.00' }
+                movimientoBancoId: { type: integer, example: 25 }
+                referencia: { type: string, maxLength: 60, example: 'GASTO-001' }
+                descripcion: { type: string, maxLength: 500, example: Transporte a zona norte }
+                categoria: { type: string, maxLength: 100, example: Transporte }
+                autorizadoPor: { type: string, maxLength: 180, example: Gerencia }
+            example:
+              fecha: '2026-09-15'
+              montoBs: '1800.00'
+              montoUsd: '10.00'
+              descripcion: Transporte a zona norte
+              categoria: Transporte
+              autorizadoPor: Gerencia
+              referencia: 'GASTO-001'
+      responses:
+        '201':
+          description: Gasto creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Gasto'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /gastos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Gastos]
+      operationId: obtenerGasto
+      summary: Obtener gasto por id
+      description: 'Requiere permiso: gastos.ver.'
+      responses:
+        '200':
+          description: Gasto encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Gasto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Gastos]
+      operationId: actualizarGasto
+      summary: Actualizar gasto (completo)
+      description: 'Requiere permiso: gastos.editar. Todos los campos son opcionales.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fecha: { type: string, example: '2026-09-16' }
+                montoBs: { type: string, example: '2000.00' }
+                montoUsd: { type: string, example: '11.00' }
+                movimientoBancoId: { type: integer, example: 25 }
+                referencia: { type: string, maxLength: 60, example: 'GASTO-001' }
+                descripcion: { type: string, maxLength: 500, example: Transporte a zona norte y centro }
+                categoria: { type: string, maxLength: 100, example: Transporte }
+                autorizadoPor: { type: string, maxLength: 180, example: Gerencia General }
+            example:
+              montoBs: '2000.00'
+              montoUsd: '11.00'
+              descripcion: Transporte a zona norte y centro
+      responses:
+        '200':
+          description: Gasto actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Gasto'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [Gastos]
+      operationId: actualizarGastoParcial
+      summary: Actualizar gasto (parcial)
+      description: 'Requiere permiso: gastos.editar. Misma semantica que PUT; recibe un subconjunto.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                montoBs: { type: string, example: '2000.00' }
+                montoUsd: { type: string, example: '11.00' }
+                descripcion: { type: string, maxLength: 500, example: Transporte ajustado }
+            example:
+              descripcion: Transporte ajustado
+      responses:
+        '200':
+          description: Gasto actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Gasto'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Gastos]
+      operationId: eliminarGasto
+      summary: Eliminar gasto
+      description: 'Requiere permiso: gastos.eliminar. Borrado duro con registro de auditoria.'
+      responses:
+        '204':
+          description: Gasto eliminado (sin contenido)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /gastos/{id}/soporte:
+    post:
+      tags: [Gastos]
+      operationId: subirSoporteGasto
+      summary: Subir comprobante de soporte
+      description: |
+        Requiere permiso: gastos.editar. Multipart: imagen o PDF, max 5 MB.
+        El campo aceptado es `archivo` (tambien se aceptan `soporte` o `file`).
+        Ejemplo de request: `POST /api/gastos/7/soporte`.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archivo]
+              properties:
+                archivo:
+                  type: string
+                  format: binary
+                  description: Imagen o PDF del comprobante (max 5 MB)
+      responses:
+        '200':
+          description: Soporte cargado; devuelve el gasto actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Gasto'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /uploads/{filename}:
+    get:
+      tags: [Archivos]
+      operationId: descargarArchivo
+      summary: Descargar archivo de soporte
+      description: |
+        Descarga autenticada y autorizada de un archivo almacenado en `UPLOAD_DIR`.
+        El directorio `uploads/` ya NO se sirve de forma publica: este endpoint es
+        la unica via de descarga. El nombre se resuelve contra el registro que lo
+        referencia y la autorizacion es por archivo: para el comprobante de un pago
+        se requiere el permiso `pagos.ver_todos`, el permiso `pagos.validar`, o ser
+        el cobrador del pago; para el soporte de un gasto se requiere `gastos.ver`.
+        En cualquier otro caso responde 403. Un archivo que ningun registro
+        referencia (o que no existe) responde 404 sin revelar su existencia.
+
+        El nombre se reduce con `path.basename()` y la ruta resuelta se verifica
+        dentro del directorio de subidas: los intentos de traversal con separadores,
+        `..` o bytes de control responden 400. La respuesta usa el `Content-Type`
+        derivado de la lista blanca de extensiones y agrega
+        `X-Content-Type-Options: nosniff`, `Content-Disposition: inline` y
+        `Cache-Control: private, no-store`.
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          description: Nombre del archivo tal como se almaceno (`<timestamp>-<slug>.<ext>`)
+          schema: { type: string, example: 1699999999999-comprobante.pdf }
+      responses:
+        '200':
+          description: Contenido del archivo (imagen o PDF)
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+            image/gif:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /notificaciones:
+    get:
+      tags: [Notificaciones]
+      operationId: listarNotificaciones
+      summary: Listar notificaciones del usuario
+      description: |
+        Requiere autenticacion (Bearer). Sin permiso especifico: siempre son las
+        notificaciones del propio usuario. Ordenadas de la mas reciente a la mas antigua.
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: soloNoLeidas
+          in: query
+          required: false
+          description: Filtra solo las no leidas
+          schema: { type: boolean, example: false }
+      responses:
+        '200':
+          description: Lista paginada de notificaciones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificacionPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /notificaciones/no-leidas:
+    get:
+      tags: [Notificaciones]
+      operationId: listarNotificacionesNoLeidas
+      summary: Listar notificaciones no leidas y su contador
+      description: |
+        Requiere autenticacion (Bearer). Igual que `/notificaciones` pero forzando
+        `soloNoLeidas=true`; agrega el contador `noLeidas` para el badge.
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+      responses:
+        '200':
+          description: Lista paginada de no leidas + contador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificacionNoLeidasPage'
+              example:
+                data:
+                  - id: 12
+                    usuarioId: 1
+                    tipo: pago_reportado
+                    titulo: Nuevo pago reportado
+                    mensaje: El cobrador Pedro Rojas reporto un pago por 3600.00 Bs.
+                    entidad: pagos_reportados
+                    entidadId: 10
+                    leida: false
+                    createdAt: '2026-09-19T14:00:00.000Z'
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+                noLeidas: 1
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /notificaciones/leer-todas:
+    patch:
+      tags: [Notificaciones]
+      operationId: marcarTodasNotificacionesLeidas
+      summary: Marcar todas las notificaciones como leidas
+      description: 'Requiere autenticacion (Bearer). Marca como leidas todas las no leidas del usuario.'
+      responses:
+        '200':
+          description: Cantidad de notificaciones actualizadas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  actualizadas: { type: integer, example: 3 }
+              example:
+                actualizadas: 3
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /notificaciones/{id}/leida:
+    patch:
+      tags: [Notificaciones]
+      operationId: marcarNotificacionLeida
+      summary: Marcar una notificacion como leida
+      description: |
+        Requiere autenticacion (Bearer). Solo permite marcar notificaciones del propio
+        usuario; un id ajeno responde 404.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Notificacion actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notificacion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /dashboard/resumen:
+    get:
+      tags: [Dashboard]
+      operationId: dashboardResumen
+      summary: Resumen del dia
+      description: 'Requiere permiso: dashboard.ver.'
+      parameters:
+        - name: fecha
+          in: query
+          required: false
+          description: Dia a resumir (YYYY-MM-DD). Por defecto, hoy en America/Caracas.
+          schema: { type: string, format: date, example: '2026-09-19' }
+      responses:
+        '200':
+          description: Agregados del dia
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+              example:
+                fecha: '2026-09-19'
+                cobrosDelDia: { totalUsd: '1500.00', totalBs: '270000.00', cantidad: 75, tasaPromedioPonderada: 180.0 }
+                comparativo:
+                  vsDiaAnterior: { totalUsd: '1200.00', variacionPct: 25.0 }
+                  vsPromedio7Dias: { promedioUsd: '1300.00', variacionPct: 15.38 }
+                pendientes: { cantidad: 12, montoUsd: '240.00', antiguedadMaxHoras: 48, antiguedadPromedioHoras: 20.5 }
+                rankingCobradores:
+                  - { cobradorId: 1, nombre: Pedro Rojas, cantidad: 40, totalUsd: '800.00' }
+                movimientosSinConciliar: { cantidad: 5, montoBs: '18000.00' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /dashboard/serie:
+    get:
+      tags: [Dashboard]
+      operationId: dashboardSerie
+      summary: Serie diaria de cobros validados
+      description: 'Requiere permiso: dashboard.ver.'
+      parameters:
+        - name: dias
+          in: query
+          required: false
+          description: Cantidad de dias (1..365). Por defecto 30.
+          schema: { type: integer, minimum: 1, maximum: 365, default: 30, example: 30 }
+      responses:
+        '200':
+          description: Serie por dia
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        fecha: { type: string, format: date, example: '2026-09-19' }
+                        totalUsd: { type: string, example: '1500.00' }
+                        cantidad: { type: integer, example: 75 }
+              example:
+                data:
+                  - { fecha: '2026-09-19', totalUsd: '1500.00', cantidad: 75 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /dashboard/nuevo-viejo:
+    get:
+      tags: [Dashboard]
+      operationId: dashboardNuevoViejo
+      summary: Cobros nuevos vs viejos
+      description: 'Requiere permiso: dashboard.ver.'
+      parameters:
+        - name: desde
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-08-21' }
+        - name: hasta
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-19' }
+      responses:
+        '200':
+          description: Totales por tipo de cobro
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+              example:
+                desde: '2026-08-21'
+                hasta: '2026-09-19'
+                nuevo: { cantidad: 320, totalUsd: '6400.00' }
+                viejo: { cantidad: 90, totalUsd: '1800.00' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /reportes/{tipo}/export:
+    get:
+      tags: [Reportes]
+      operationId: exportarReporte
+      summary: Exportar reporte (Excel o PDF)
+      description: |
+        Requiere permiso: reportes.exportar. Devuelve un archivo binario:
+        `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (Excel)
+        o `application/pdf` segun el parametro `formato`. Documentado como
+        `application/octet-stream` por ser respuesta binaria.
+      parameters:
+        - name: tipo
+          in: path
+          required: true
+          description: Tipo de reporte a exportar
+          schema:
+            type: string
+            enum: [cobros, por-cobrador, nuevo-viejo, tasas, pendientes, movimientos-no-conciliados, pagos-sin-respaldo, flujo-caja, gastos]
+            example: cobros
+        - name: formato
+          in: query
+          required: false
+          description: Formato de exportacion (por defecto excel)
+          schema: { type: string, enum: [excel, pdf], default: excel, example: excel }
+        - name: fechaDesde
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-01' }
+        - name: fechaHasta
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-30' }
+        - name: cobradorId
+          in: query
+          required: false
+          schema: { type: integer, example: 1 }
+        - name: bancoId
+          in: query
+          required: false
+          schema: { type: integer, example: 1 }
+        - name: estado
+          in: query
+          required: false
+          schema: { type: string, enum: [pendiente, validado, rechazado, duplicado], example: validado }
+      responses:
+        '200':
+          description: Archivo Excel (.xlsx) o PDF
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+              description: 'attachment; filename="cobros_2026-09-01_2026-09-30.xlsx"'
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /reportes/cobros:
+    get:
+      tags: [Reportes]
+      operationId: reporteCobros
+      summary: Reporte de cobros
+      description: 'Requiere permiso: reportes.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - $ref: '#/components/parameters/FechaDesde'
+        - $ref: '#/components/parameters/FechaHasta'
+        - $ref: '#/components/parameters/CobradorIdQuery'
+        - $ref: '#/components/parameters/BancoIdQuery'
+        - $ref: '#/components/parameters/EstadoQuery'
+      responses:
+        '200':
+          description: Reporte paginado de cobros
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagoPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /reportes/por-cobrador:
+    get:
+      tags: [Reportes]
+      operationId: reportePorCobrador
+      summary: Reporte por cobrador
+      description: 'Requiere permiso: reportes.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - $ref: '#/components/parameters/FechaDesde'
+        - $ref: '#/components/parameters/FechaHasta'
+        - $ref: '#/components/parameters/CobradorIdQuery'
+        - $ref: '#/components/parameters/BancoIdQuery'
+        - $ref: '#/components/parameters/EstadoQuery'
+      responses:
+        '200':
+          description: Reporte paginado por cobrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paginated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /reportes/nuevo-viejo:
+    get:
+      tags: [Reportes]
+      operationId: reporteNuevoViejo
+      summary: Reporte nuevo vs viejo
+      description: 'Requiere permiso: reportes.ver. Incluye un objeto `resumen`.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - $ref: '#/components/parameters/FechaDesde'
+        - $ref: '#/components/parameters/FechaHasta'
+        - $ref: '#/components/parameters/CobradorIdQuery'
+        - $ref: '#/components/parameters/BancoIdQuery'
+        - $ref: '#/components/parameters/EstadoQuery'
+      responses:
+        '200':
+          description: Evolucion paginada + resumen por tipo
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      resumen:
+                        type: object
+                        additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /reportes/tasas:
+    get:
+      tags: [Reportes]
+      operationId: reporteTasas
+      summary: Reporte de tasas
+      description: 'Requiere permiso: reportes.ver. Incluye un objeto `resumen`.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - $ref: '#/components/parameters/FechaDesde'
+        - $ref: '#/components/parameters/FechaHasta'
+        - $ref: '#/components/parameters/CobradorIdQuery'
+        - $ref: '#/components/parameters/BancoIdQuery'
+        - $ref: '#/components/parameters/EstadoQuery'
+      responses:
+        '200':
+          description: Serie paginada de tasas + resumen
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      resumen:
+                        type: object
+                        additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /reportes/pendientes:
+    get:
+      tags: [Reportes]
+      operationId: reportePendientes
+      summary: Reporte de pagos pendientes
+      description: 'Requiere permiso: reportes.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - $ref: '#/components/parameters/FechaDesde'
+        - $ref: '#/components/parameters/FechaHasta'
+        - $ref: '#/components/parameters/CobradorIdQuery'
+        - $ref: '#/components/parameters/BancoIdQuery'
+        - $ref: '#/components/parameters/EstadoQuery'
+      responses:
+        '200':
+          description: Reporte paginado de pendientes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paginated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /reportes/movimientos-no-conciliados:
+    get:
+      tags: [Reportes]
+      operationId: reporteMovimientosNoConciliados
+      summary: Reporte de movimientos no conciliados
+      description: 'Requiere permiso: reportes.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - $ref: '#/components/parameters/FechaDesde'
+        - $ref: '#/components/parameters/FechaHasta'
+        - $ref: '#/components/parameters/CobradorIdQuery'
+        - $ref: '#/components/parameters/BancoIdQuery'
+        - $ref: '#/components/parameters/EstadoQuery'
+      responses:
+        '200':
+          description: Reporte paginado de movimientos no conciliados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paginated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /reportes/pagos-sin-respaldo:
+    get:
+      tags: [Reportes]
+      operationId: reportePagosSinRespaldo
+      summary: Reporte de pagos sin respaldo bancario
+      description: 'Requiere permiso: reportes.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - $ref: '#/components/parameters/FechaDesde'
+        - $ref: '#/components/parameters/FechaHasta'
+        - $ref: '#/components/parameters/CobradorIdQuery'
+        - $ref: '#/components/parameters/BancoIdQuery'
+        - $ref: '#/components/parameters/EstadoQuery'
+      responses:
+        '200':
+          description: Reporte paginado de pagos sin respaldo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagoPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /reportes/flujo-caja:
+    get:
+      tags: [Reportes]
+      operationId: reporteFlujoCaja
+      summary: Reporte de flujo de caja
+      description: 'Requiere permiso: reportes.ver. Incluye un objeto `resumen`.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - $ref: '#/components/parameters/FechaDesde'
+        - $ref: '#/components/parameters/FechaHasta'
+        - $ref: '#/components/parameters/CobradorIdQuery'
+        - $ref: '#/components/parameters/BancoIdQuery'
+        - $ref: '#/components/parameters/EstadoQuery'
+      responses:
+        '200':
+          description: Flujo de caja paginado + resumen
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      resumen:
+                        type: object
+                        additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /reportes/gastos:
+    get:
+      tags: [Reportes]
+      operationId: reporteGastos
+      summary: Reporte de gastos
+      description: 'Requiere permiso: reportes.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - $ref: '#/components/parameters/FechaDesde'
+        - $ref: '#/components/parameters/FechaHasta'
+        - $ref: '#/components/parameters/CobradorIdQuery'
+        - $ref: '#/components/parameters/BancoIdQuery'
+        - $ref: '#/components/parameters/EstadoQuery'
+      responses:
+        '200':
+          description: Reporte paginado de gastos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Paginated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auditoria:
+    get:
+      tags: [Auditoria]
+      operationId: listarAuditoria
+      summary: Listar bitacora de auditoria
+      description: 'Requiere permiso: auditoria.ver.'
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PageSizeQuery'
+        - name: usuarioId
+          in: query
+          required: false
+          schema: { type: integer, example: 1 }
+        - name: entidad
+          in: query
+          required: false
+          schema: { type: string, maxLength: 120, example: pagos_reportados }
+        - name: accion
+          in: query
+          required: false
+          schema: { type: string, maxLength: 120, example: validar }
+        - name: fechaDesde
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-01' }
+        - name: fechaHasta
+          in: query
+          required: false
+          schema: { type: string, format: date, example: '2026-09-30' }
+      responses:
+        '200':
+          description: Lista paginada de registros de auditoria
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditoriaPage'
+              example:
+                data:
+                  - id: 100
+                    usuarioId: 1
+                    entidad: pagos_reportados
+                    entidadId: 10
+                    accion: validar
+                    datosAntes: { estado: pendiente }
+                    datosDespues: { estado: validado }
+                    ip: 127.0.0.1
+                    createdAt: '2026-09-19T15:00:00.000Z'
+                    usuario: { id: 1, usuario: admin, nombreCompleto: Administrador General }
+                meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'Token JWT de acceso (accessToken) enviado como Authorization: Bearer <token>.'
+
+  parameters:
+    PageQuery:
+      name: page
+      in: query
+      required: false
+      description: Numero de pagina (>= 1). Por defecto 1.
+      schema: { type: integer, minimum: 1, example: 1 }
+    PageSizeQuery:
+      name: pageSize
+      in: query
+      required: false
+      description: Tamano de pagina (1..200). Por defecto 20.
+      schema: { type: integer, minimum: 1, maximum: 200, example: 20 }
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, example: 1 }
+    FechaDesde:
+      name: fechaDesde
+      in: query
+      required: false
+      description: Fecha inicial del rango (YYYY-MM-DD)
+      schema: { type: string, format: date, example: '2026-09-01' }
+    FechaHasta:
+      name: fechaHasta
+      in: query
+      required: false
+      description: Fecha final del rango (YYYY-MM-DD)
+      schema: { type: string, format: date, example: '2026-09-30' }
+    CobradorIdQuery:
+      name: cobradorId
+      in: query
+      required: false
+      description: Filtra por cobrador
+      schema: { type: integer, example: 1 }
+    BancoIdQuery:
+      name: bancoId
+      in: query
+      required: false
+      description: Filtra por banco
+      schema: { type: integer, example: 1 }
+    EstadoQuery:
+      name: estado
+      in: query
+      required: false
+      description: Filtra por estado del pago
+      schema: { type: string, enum: [pendiente, validado, rechazado, duplicado], example: validado }
+
+  responses:
+    BadRequest:
+      description: Solicitud invalida (validacion Zod o regla de negocio)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error:
+              code: validation_error
+              message: Datos invalidos
+              details: {}
+    Unauthorized:
+      description: No autenticado (token ausente, invalido o expirado)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: unauthorized, message: Token de acceso requerido }
+    Forbidden:
+      description: Permisos insuficientes
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: forbidden, message: 'Permisos insuficientes: pagos.validar' }
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: not_found, message: Recurso no encontrado }
+    Conflict:
+      description: Conflicto (duplicado o estado incompatible)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: conflict, message: El registro ya existe (valor duplicado) }
+    TooManyRequests:
+      description: Demasiadas solicitudes (rate limit o cuenta bloqueada)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: too_many_requests, message: Demasiados intentos. Intente mas tarde. }
+    InternalError:
+      description: Error interno del servidor
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: internal_error, message: Error interno del servidor }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: bad_request
+            message:
+              type: string
+              example: Datos invalidos
+            details:
+              type: object
+              description: Detalle adicional opcional (por ejemplo, errores de validacion)
+              nullable: true
+
+    Meta:
+      type: object
+      required: [page, pageSize, total, totalPages]
+      properties:
+        page: { type: integer, example: 1 }
+        pageSize: { type: integer, example: 20 }
+        total: { type: integer, example: 1 }
+        totalPages: { type: integer, example: 1 }
+
+    Paginated:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    AuthUser:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        usuario: { type: string, example: admin }
+        nombreCompleto: { type: string, example: Administrador General }
+        rolId: { type: integer, example: 1 }
+        rol: { type: string, example: Administrador }
+        permisos:
+          type: array
+          items: { type: string }
+          example: [usuarios.ver, pagos.validar]
+        cobradorId: { type: integer, nullable: true, example: null }
+
+    AuthTokens:
+      type: object
+      required: [accessToken, refreshToken, expiresIn]
+      properties:
+        accessToken: { type: string, example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... }
+        refreshToken: { type: string, example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... }
+        expiresIn: { type: string, description: 'TTL del access token', example: 15m }
+
+    AuthResult:
+      type: object
+      required: [user, tokens]
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        tokens:
+          $ref: '#/components/schemas/AuthTokens'
+
+    Usuario:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        nombreCompleto: { type: string, example: Administrador General }
+        usuario: { type: string, example: admin }
+        email: { type: string, format: email, example: admin@empresa.com }
+        rolId: { type: integer, example: 1 }
+        activo: { type: boolean, example: true }
+        intentosFallidos: { type: integer, example: 0 }
+        bloqueadoHasta: { type: string, format: date-time, nullable: true, example: null }
+        ultimoAcceso: { type: string, format: date-time, nullable: true, example: '2026-09-19T12:00:00.000Z' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        rol:
+          type: object
+          properties:
+            id: { type: integer, example: 1 }
+            nombre: { type: string, example: Administrador }
+
+    UsuarioPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Usuario' }
+
+    Rol:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        nombre: { type: string, example: Administrador }
+        descripcion: { type: string, nullable: true, example: Acceso total }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        permisos:
+          type: array
+          items: { type: string }
+          example: [usuarios.ver, pagos.validar]
+        usuarioCount: { type: integer, example: 1 }
+
+    RolPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Rol' }
+
+    Cobrador:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        nombre: { type: string, example: Pedro Rojas }
+        codigo: { type: string, example: CBR-001 }
+        usuarioId: { type: integer, nullable: true, example: 3 }
+        activo: { type: boolean, example: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        usuario:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer, example: 3 }
+            usuario: { type: string, example: jperez }
+
+    CobradorPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Cobrador' }
+
+    Banco:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        nombre: { type: string, example: Banco de Venezuela }
+        codigo: { type: string, example: BDV }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    BancoResumen:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        nombre: { type: string, example: Banco de Venezuela }
+        codigo: { type: string, example: BDV }
+
+    BancoPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Banco' }
+
+    Cuenta:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        bancoId: { type: integer, example: 1 }
+        numeroCuenta: { type: string, example: '0102-0123-45-6789012345' }
+        alias: { type: string, nullable: true, example: Cuenta principal }
+        activo: { type: boolean, example: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        banco:
+          $ref: '#/components/schemas/BancoResumen'
+
+    CuentaResumen:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        numeroCuenta: { type: string, example: '0102-0123-45-6789012345' }
+        alias: { type: string, nullable: true, example: Cuenta principal }
+        banco:
+          $ref: '#/components/schemas/BancoResumen'
+
+    CuentaPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Cuenta' }
+
+    TipoPago:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        nombre: { type: string, example: Pago Movil }
+        descripcion: { type: string, nullable: true, example: Pago movil interbancario }
+        activo: { type: boolean, example: true }
+        orden: { type: integer, example: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    TipoPagoResumen:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        nombre: { type: string, example: Pago Movil }
+        descripcion: { type: string, nullable: true, example: Pago movil interbancario }
+
+    TipoPagoPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/TipoPago' }
+
+    CreateTipoPagoRequest:
+      type: object
+      required: [nombre]
+      properties:
+        nombre: { type: string, maxLength: 80, example: Pago Movil }
+        descripcion: { type: string, maxLength: 255, nullable: true, example: Pago movil interbancario }
+        activo: { type: boolean, default: true, example: true }
+        orden: { type: integer, minimum: 0, default: 0, example: 1 }
+
+    UpdateTipoPagoRequest:
+      type: object
+      properties:
+        nombre: { type: string, maxLength: 80, example: Pago Movil }
+        descripcion: { type: string, maxLength: 255, nullable: true, example: Pago movil interbancario }
+        activo: { type: boolean, example: true }
+        orden: { type: integer, minimum: 0, example: 2 }
+
+    Tasa:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        fecha: { type: string, format: date-time, example: '2026-09-19T00:00:00.000Z' }
+        valor:
+          type: string
+          description: Valor de la tasa como string (DECIMAL(18,6))
+          example: '36.500000'
+        fuente: { type: string, nullable: true, example: BCV }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    TasaPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Tasa' }
+
+    TasaBcv:
+      type: object
+      properties:
+        id: { type: integer, example: 5 }
+        apiId:
+          type: string
+          description: Identificador uuid de la API externa (clave de deduplicacion)
+          example: 5f2c9b7a1d3e4f60718293a4b5c6d7e8
+        fecha: { type: string, format: date-time, example: '2026-09-19T00:00:00.000Z' }
+        usd:
+          type: string
+          description: Tasa en USD como string (DECIMAL(18,6))
+          example: '36.500000'
+        fuente: { type: string, nullable: true, example: BCV }
+        fechaApi:
+          type: string
+          format: date-time
+          description: Timestamp original devuelto por la API
+          example: '2026-09-19T12:00:00.000Z'
+        createdAt: { type: string, format: date-time }
+
+    TasaBcvPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/TasaBcv' }
+
+    BcvJobEstado:
+      type: object
+      properties:
+        habilitado: { type: boolean, example: true }
+        intervaloMinutos: { type: integer, description: Intervalo fijo del job en minutos, example: 60 }
+
+    BcvJobToggleRequest:
+      type: object
+      required: [habilitado]
+      properties:
+        habilitado: { type: boolean, example: false }
+
+    Parametro:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        clave: { type: string, example: tolerancia_monto_bs }
+        valor: { type: string, example: '0.01' }
+        descripcion: { type: string, nullable: true, example: Tolerancia de monto en bolivares }
+        updatedAt: { type: string, format: date-time }
+
+    ParametroPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Parametro' }
+
+    ReportarPagoRequest:
+      type: object
+      required: [fechaPago, referencia, cuentaRecaudadoraId, montoBs, montoUsd, tipoCobro]
+      properties:
+        fechaPago:
+          type: string
+          description: Fecha de pago (fecha de calendario)
+          example: '2026-09-19'
+        fechaDocumento:
+          type: string
+          description: Fecha del documento/usado para clasificar antiguedad (opcional)
+          example: '2026-08-01'
+        referencia: { type: string, maxLength: 60, example: '12345678' }
+        bancoOrigenId:
+          type: integer
+          nullable: true
+          description: >-
+            Banco de origen opcional. Si el parametro pago.banco_origen_obligatorio
+            esta activo ('1', valor por defecto) y no se envia, el API responde 400 con
+            "El banco de origen es obligatorio.".
+          example: 1
+        cuentaRecaudadoraId: { type: integer, example: 1 }
+        montoBs:
+          type: string
+          description: >-
+            Monto en bolivares como string (DECIMAL(18,2)). Debe ser estrictamente
+            positivo (400 "El monto debe ser un numero positivo" si es no numerico,
+            cero o negativo).
+          example: '3600.00'
+        montoUsd:
+          type: string
+          description: >-
+            Monto en dolares como string (DECIMAL(18,2)). Debe ser estrictamente
+            positivo (400 "El monto debe ser un numero positivo" si es no numerico,
+            cero o negativo).
+          example: '20.00'
+        cliente: { type: string, maxLength: 180, example: Juan Perez }
+        concepto: { type: string, maxLength: 255, example: Pago cuota mensual }
+        tipoCobro: { type: string, enum: [nuevo, viejo], example: nuevo }
+        tipoPagoId:
+          type: integer
+          description: >-
+            Referencia opcional al catalogo tipos_pago (debe existir y estar activo). Debe
+            OMITIRSE cuando no aplica; enviar null responde 400.
+          example: 1
+        observaciones: { type: string, maxLength: 2000, example: Reportado en ruta }
+        cobradorId:
+          type: integer
+          description: Solo permitido con permiso pagos.ver_todos
+          example: 1
+
+    Pago:
+      type: object
+      properties:
+        id: { type: integer, example: 10 }
+        fechaPago: { type: string, format: date-time, example: '2026-09-19T00:00:00.000Z' }
+        referencia: { type: string, example: '12345678' }
+        montoBs: { type: string, description: 'String (DECIMAL(18,2))', example: '3600.00' }
+        montoUsd: { type: string, description: 'String (DECIMAL(18,2))', example: '20.00' }
+        tasa: { type: string, description: 'String (DECIMAL(18,6)) derivada', example: '180.000000' }
+        cliente: { type: string, nullable: true, example: Juan Perez }
+        concepto: { type: string, nullable: true, example: Pago cuota mensual }
+        tipoPagoId: { type: integer, nullable: true, example: 1 }
+        soporteUrl: { type: string, nullable: true, example: /uploads/1699999999999-comprobante.pdf }
+        tipoCobro: { type: string, enum: [nuevo, viejo], example: nuevo }
+        tipoCobroDerivado: { type: string, enum: [nuevo, viejo], nullable: true, example: nuevo }
+        revisarClasificacion: { type: boolean, example: false }
+        observaciones: { type: string, nullable: true, example: null }
+        estado: { type: string, enum: [pendiente, validado, rechazado, duplicado], example: pendiente }
+        motivoRechazo: { type: string, nullable: true, example: null }
+        validadoAt: { type: string, format: date-time, nullable: true, example: null }
+        createdAt: { type: string, format: date-time }
+        cobradorId: { type: integer, example: 1 }
+        bancoOrigenId: { type: integer, nullable: true, example: 1 }
+        cuentaRecaudadoraId: { type: integer, example: 1 }
+        movimientoBancoId: { type: integer, nullable: true, example: null }
+        cobrador:
+          type: object
+          properties:
+            id: { type: integer, example: 1 }
+            nombre: { type: string, example: Pedro Rojas }
+            codigo: { type: string, example: CBR-001 }
+        tipoPago:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer, example: 1 }
+            nombre: { type: string, example: Pago Movil }
+        bancoOrigen:
+          type: object
+          nullable: true
+          description: >-
+            Banco de origen del pago. Cuando el pago no tiene banco (regla
+            pago.banco_origen_obligatorio desactivada y sin seleccion), el API nunca
+            devuelve null: responde { id: null, nombre: "N/A", codigo: "N/A" } para que
+            todo cliente muestre "N/A" sin casos especiales.
+          properties:
+            id: { type: integer, nullable: true, example: 1 }
+            nombre: { type: string, example: Banco de Venezuela }
+            codigo: { type: string, example: BDV }
+        cuentaRecaudadora:
+          type: object
+          properties:
+            id: { type: integer, example: 1 }
+            numeroCuenta: { type: string, example: '0102-0123-45-6789012345' }
+            alias: { type: string, nullable: true, example: Cuenta principal }
+            banco:
+              type: object
+              properties:
+                id: { type: integer, example: 1 }
+                nombre: { type: string, example: Banco de Venezuela }
+        movimientoBanco:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer, example: 25 }
+            referencia: { type: string, example: '12345678' }
+            montoBs: { type: string, example: '3600.00' }
+            fechaEjecucion: { type: string, format: date-time, example: '2026-09-19T00:00:00.000Z' }
+        validador:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer, example: 1 }
+            nombreCompleto: { type: string, example: Administrador General }
+
+    PagoPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Pago' }
+
+    RevertirPagoRequest:
+      type: object
+      required: [estado]
+      properties:
+        estado:
+          type: string
+          enum: [pendiente, rechazado]
+          description: Estado destino del pago al revertir la validacion
+          example: rechazado
+        motivoRechazo:
+          type: string
+          minLength: 3
+          maxLength: 1000
+          nullable: true
+          description: Obligatorio cuando `estado` es `rechazado`; no debe enviarse cuando es `pendiente`.
+          example: Validacion revertida por error de conciliacion
+
+    Coincidencia:
+      type: object
+      properties:
+        movimiento:
+          type: object
+          properties:
+            id: { type: integer, example: 25 }
+            referencia: { type: string, example: '12345678' }
+            montoBs: { type: string, example: '3600.00' }
+            fechaEjecucion: { type: string, format: date-time, example: '2026-09-19T00:00:00.000Z' }
+        puntaje: { type: integer, description: 'Puntaje 0..100', example: 90 }
+        referenciaExacta: { type: boolean, example: true }
+        coincidenciaSufijo: { type: boolean, example: false }
+        diferenciaMontoBs: { type: string, example: '0.00' }
+        diferenciaDias: { type: integer, example: 0 }
+
+    DuplicadoInfo:
+      type: object
+      description: >-
+        Senal CR-001 de duplicado: un movimiento bancario ya conciliado con otro pago
+        que coincide con el pago consultado por referencia (exacta o sufijo con el
+        minimo de 4 digitos) y monto en Bs dentro de `match.amount_tolerance_bs`,
+        dentro de la MISMA cuenta recaudadora y SIN ventana de fecha.
+      properties:
+        movimientoBancoId: { type: integer, description: 'Movimiento ya conciliado', example: 25 }
+        referencia: { type: string, description: 'Referencia del movimiento', example: '12345678' }
+        montoBs: { type: string, description: 'String (DECIMAL(18,2))', example: '3600.00' }
+        pagoReportadoId: { type: integer, description: 'Pago con el que ya esta conciliado', example: 10 }
+
+    Movimiento:
+      type: object
+      properties:
+        id: { type: integer, example: 25 }
+        referencia: { type: string, example: '12345678' }
+        montoBs: { type: string, description: 'String (DECIMAL(18,2))', example: '3600.00' }
+        fechaEjecucion: { type: string, format: date-time, example: '2026-09-19T00:00:00.000Z' }
+        estadoConciliacion: { type: string, enum: [no_conciliado, conciliado], example: no_conciliado }
+        createdAt: { type: string, format: date-time }
+        cuentaRecaudadoraId: { type: integer, example: 1 }
+        loteImportacionId: { type: integer, nullable: true, example: 3 }
+        cuentaRecaudadora:
+          $ref: '#/components/schemas/CuentaResumen'
+        lote:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer, example: 3 }
+            nombreArchivo: { type: string, example: extracto-septiembre.xlsx }
+            createdAt: { type: string, format: date-time }
+        pago:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer, example: 10 }
+            referencia: { type: string, example: '12345678' }
+            estado: { type: string, enum: [pendiente, validado, rechazado, duplicado], example: validado }
+            cobrador:
+              type: object
+              properties:
+                id: { type: integer, example: 1 }
+                nombre: { type: string, example: Pedro Rojas }
+                codigo: { type: string, example: CBR-001 }
+
+    MovimientoDetalle:
+      allOf:
+        - $ref: '#/components/schemas/Movimiento'
+        - type: object
+          properties:
+            conciliacion:
+              type: object
+              nullable: true
+              properties:
+                id: { type: integer, example: 5 }
+                tipo: { type: string, enum: [automatica, manual], example: manual }
+                diferenciaBs: { type: string, example: '0.00' }
+                createdAt: { type: string, format: date-time }
+                usuario:
+                  type: object
+                  properties:
+                    id: { type: integer, example: 1 }
+                    nombreCompleto: { type: string, example: Administrador General }
+
+    MovimientoPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Movimiento' }
+
+    PreviewFila:
+      type: object
+      properties:
+        fila: { type: integer, example: 2 }
+        referencia: { type: string, example: '12345678' }
+        montoBs: { type: string, example: '3600.00' }
+        fechaEjecucion: { type: string, format: date-time, example: '2026-09-19T00:00:00.000Z' }
+
+    RowError:
+      type: object
+      properties:
+        fila: { type: integer, example: 5 }
+        motivo: { type: string, example: 'Monto en bolivares invalido: "ABC"' }
+        raw:
+          type: array
+          items: { type: string }
+          example: ['999', 'ABC', '19/09/2026']
+
+    ImportResultado:
+      type: object
+      properties:
+        loteId: { type: integer, example: 3 }
+        nombreArchivo: { type: string, example: extracto-septiembre.xlsx }
+        filasTotales: { type: integer, example: 120 }
+        insertadas: { type: integer, example: 116 }
+        duplicadas: { type: integer, example: 2 }
+        conError: { type: integer, example: 2 }
+        detalleErrores:
+          type: array
+          items: { $ref: '#/components/schemas/RowError' }
+
+    LoteImportacion:
+      type: object
+      properties:
+        id: { type: integer, example: 3 }
+        usuarioId: { type: integer, example: 1 }
+        nombreArchivo: { type: string, example: extracto-septiembre.xlsx }
+        filasTotales: { type: integer, example: 120 }
+        insertadas: { type: integer, example: 116 }
+        duplicadas: { type: integer, example: 2 }
+        conError: { type: integer, example: 2 }
+        detalleErrores:
+          type: object
+          nullable: true
+          description: Detalle JSON de errores del lote (o null)
+        createdAt: { type: string, format: date-time }
+        usuario:
+          type: object
+          properties:
+            id: { type: integer, example: 1 }
+            usuario: { type: string, example: admin }
+            nombreCompleto: { type: string, example: Administrador General }
+        _count:
+          type: object
+          properties:
+            movimientos: { type: integer, example: 116 }
+
+    LotePage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/LoteImportacion' }
+
+    Gasto:
+      type: object
+      properties:
+        id: { type: integer, example: 7 }
+        fecha: { type: string, format: date-time, example: '2026-09-15T00:00:00.000Z' }
+        montoBs: { type: string, description: 'String (DECIMAL(18,2))', example: '1800.00' }
+        montoUsd: { type: string, description: 'String (DECIMAL(18,2))', example: '10.00' }
+        tasa: { type: string, description: 'String (DECIMAL(18,6)) derivada', example: '180.000000' }
+        movimientoBancoId: { type: integer, nullable: true, example: null }
+        referencia: { type: string, nullable: true, example: 'GASTO-001' }
+        descripcion: { type: string, example: Transporte a zona norte }
+        categoria: { type: string, example: Transporte }
+        autorizadoPor: { type: string, example: Gerencia }
+        registradoPor: { type: integer, example: 1 }
+        soporteUrl: { type: string, nullable: true, example: /uploads/1699999999999-factura.pdf }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        registrador:
+          type: object
+          properties:
+            id: { type: integer, example: 1 }
+            nombreCompleto: { type: string, example: Administrador General }
+            usuario: { type: string, example: admin }
+
+    GastoPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Gasto' }
+
+    Auditoria:
+      type: object
+      properties:
+        id: { type: integer, example: 100 }
+        usuarioId: { type: integer, nullable: true, example: 1 }
+        entidad: { type: string, example: pagos_reportados }
+        entidadId: { type: integer, nullable: true, example: 10 }
+        accion: { type: string, example: validar }
+        datosAntes: { type: object, nullable: true, description: Snapshot JSON antes del cambio }
+        datosDespues: { type: object, nullable: true, description: Snapshot JSON despues del cambio }
+        ip: { type: string, nullable: true, example: 127.0.0.1 }
+        createdAt: { type: string, format: date-time }
+        usuario:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer, example: 1 }
+            usuario: { type: string, example: admin }
+            nombreCompleto: { type: string, example: Administrador General }
+
+    AuditoriaPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Auditoria' }
+
+    Notificacion:
+      type: object
+      properties:
+        id: { type: integer, example: 12 }
+        usuarioId: { type: integer, example: 1 }
+        tipo: { type: string, example: pago_reportado }
+        titulo: { type: string, example: Nuevo pago reportado }
+        mensaje: { type: string, example: El cobrador Pedro Rojas reporto un pago por 3600.00 Bs. }
+        entidad: { type: string, nullable: true, example: pagos_reportados }
+        entidadId: { type: integer, nullable: true, example: 10 }
+        leida: { type: boolean, example: false }
+        createdAt: { type: string, format: date-time }
+
+    NotificacionPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Notificacion' }
+
+    NotificacionNoLeidasPage:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Notificacion' }
+            noLeidas:
+              type: integer
+              description: Cantidad total de notificaciones no leidas del usuario
+              example: 1

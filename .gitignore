@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Environment variables — NEVER commit real secrets.
+# Use .env.example as the template to create your local .env
+.env
+.env.*
+!.env.example
+
+# Uploaded user files (payment receipts, expense supports)
+uploads/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Prisma local database artifacts
+*.db
+*.sqlite
+
+# Local agent tooling (generated, machine-specific)
+.atl/
+.codegraph/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Ad-hoc local scratch files
+smoke-pago-id.txt
+_tmp_*
+*.bak

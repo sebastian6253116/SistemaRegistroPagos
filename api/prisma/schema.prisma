@@ -1,0 +1,425 @@
+// Prisma schema for the Payment Collection Management System (Sistema de Gestion de Cobros)
+//
+// Conventions:
+// - Model names in Spanish PascalCase to match the domain language of the spec.
+// - Table/column names mapped to snake_case (Spanish) for a readable raw SQL schema.
+// - ALL monetary amounts use DECIMAL(18,2). ALL exchange rates use DECIMAL(18,6).
+//   NEVER use FLOAT/DOUBLE for money.
+// - Timestamps are stored in UTC. The business timezone is America/Caracas and is
+//   applied only when formatting on the client.
+//
+// Datasource note: XAMPP ships MariaDB 10.4 (reported as MySQL). The `mysql`
+// provider is used because Prisma's MySQL connector is fully compatible with
+// MariaDB 10.4. See README for the deviation from the "MySQL 8" requirement.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Security & catalogs
+// ---------------------------------------------------------------------------
+
+model Rol {
+  id          Int      @id @default(autoincrement())
+  nombre      String   @unique @db.VarChar(80)
+  descripcion String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  usuarios Usuario[]
+  permisos RolPermiso[]
+
+  @@map("roles")
+}
+
+model Permiso {
+  id          Int      @id @default(autoincrement())
+  clave       String   @unique @db.VarChar(100) // e.g. pagos.validar, gastos.crear
+  descripcion String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  roles RolPermiso[]
+
+  @@map("permisos")
+}
+
+model RolPermiso {
+  rolId     Int @map("rol_id")
+  permisoId Int @map("permiso_id")
+
+  rol     Rol     @relation(fields: [rolId], references: [id], onDelete: Cascade)
+  permiso Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+
+  @@id([rolId, permisoId])
+  @@map("rol_permisos")
+}
+
+model Usuario {
+  id             Int     @id @default(autoincrement())
+  nombreCompleto String  @map("nombre_completo") @db.VarChar(150)
+  usuario        String  @unique @db.VarChar(60)
+  email          String  @unique @db.VarChar(150)
+  passwordHash   String  @map("password_hash") @db.VarChar(255)
+  rolId          Int     @map("rol_id")
+  activo         Boolean @default(true)
+
+  // Login hardening (section 6.1: block after N failed attempts)
+  intentosFallidos Int       @default(0) @map("intentos_fallidos")
+  bloqueadoHasta   DateTime? @map("bloqueado_hasta")
+
+  ultimoAcceso DateTime? @map("ultimo_acceso")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  rol               Rol               @relation(fields: [rolId], references: [id])
+  refreshTokens     RefreshToken[]
+  passwordResets    PasswordReset[]
+  cobrador          Cobrador?
+  pagosValidados    PagoReportado[]   @relation("PagoValidadoPor")
+  lotesImportacion  LoteImportacion[]
+  conciliaciones    Conciliacion[]
+  gastosRegistrados Gasto[]           @relation("GastoRegistradoPor")
+  auditoria         Auditoria[]
+  notificaciones    Notificacion[]    @relation("NotificacionDestinatario")
+
+  @@index([rolId])
+  @@index([activo])
+  @@map("usuarios")
+}
+
+// Refresh token rotation store. Only a hash of the token is persisted.
+model RefreshToken {
+  id        Int       @id @default(autoincrement())
+  usuarioId Int       @map("usuario_id")
+  tokenHash String    @unique @map("token_hash") @db.VarChar(255)
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@map("refresh_tokens")
+}
+
+model PasswordReset {
+  id        Int       @id @default(autoincrement())
+  usuarioId Int       @map("usuario_id")
+  tokenHash String    @unique @map("token_hash") @db.VarChar(255)
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@map("password_resets")
+}
+
+model Cobrador {
+  id        Int      @id @default(autoincrement())
+  nombre    String   @db.VarChar(150)
+  codigo    String   @unique @db.VarChar(40)
+  usuarioId Int?     @unique @map("usuario_id")
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  usuario Usuario?        @relation(fields: [usuarioId], references: [id])
+  pagos   PagoReportado[]
+
+  @@map("cobradores")
+}
+
+model Banco {
+  id        Int      @id @default(autoincrement())
+  nombre    String   @db.VarChar(120)
+  codigo    String   @unique @db.VarChar(20)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  cuentasRecaudadoras CuentaRecaudadora[]
+  pagosOrigen         PagoReportado[]     @relation("PagoBancoOrigen")
+
+  @@map("bancos")
+}
+
+model CuentaRecaudadora {
+  id           Int      @id @default(autoincrement())
+  bancoId      Int      @map("banco_id")
+  numeroCuenta String   @map("numero_cuenta") @db.VarChar(40)
+  alias        String?  @db.VarChar(120)
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  banco       Banco             @relation(fields: [bancoId], references: [id])
+  pagos       PagoReportado[]
+  movimientos MovimientoBanco[]
+
+  @@unique([bancoId, numeroCuenta])
+  @@map("cuentas_recaudadoras")
+}
+
+// Configurable payment-method catalog (Pago Movil, Transferencia, Zelle...).
+// Distinct from the TipoCobro enum (nuevo/viejo), which classifies the vintage.
+model TipoPago {
+  id          Int      @id @default(autoincrement())
+  nombre      String   @unique @db.VarChar(80)
+  descripcion String?  @db.VarChar(255)
+  activo      Boolean  @default(true)
+  orden       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  pagos PagoReportado[]
+
+  @@map("tipos_pago")
+}
+
+// ---------------------------------------------------------------------------
+// Operation
+// ---------------------------------------------------------------------------
+
+enum EstadoPago {
+  pendiente
+  validado
+  rechazado
+  duplicado
+}
+
+enum TipoCobro {
+  nuevo
+  viejo
+}
+
+enum EstadoConciliacion {
+  no_conciliado
+  conciliado
+}
+
+enum TipoConciliacion {
+  automatica
+  manual
+}
+
+model PagoReportado {
+  id                  Int      @id @default(autoincrement())
+  cobradorId          Int      @map("cobrador_id")
+  // Business calendar date (no time): never shifted by timezone.
+  fechaPago           DateTime @map("fecha_pago") @db.Date
+  referencia          String   @db.VarChar(60)
+  bancoOrigenId       Int?     @map("banco_origen_id")
+  cuentaRecaudadoraId Int      @map("cuenta_recaudadora_id")
+
+  montoBs  Decimal @map("monto_bs") @db.Decimal(18, 2)
+  montoUsd Decimal @map("monto_usd") @db.Decimal(18, 2)
+  tasa     Decimal @db.Decimal(18, 6) // derived = monto_bs / monto_usd
+
+  cliente              String?    @db.VarChar(180)
+  concepto             String?    @db.VarChar(255)
+  tipoPagoId           Int?       @map("tipo_pago_id")
+  soporteUrl           String?    @map("soporte_url") @db.VarChar(500)
+  tipoCobro            TipoCobro  @map("tipo_cobro")
+  // Derived vintage classification. Kept separate from the collector's mark so
+  // a mismatch can be flagged for review without overwriting the user input.
+  tipoCobroDerivado    TipoCobro? @map("tipo_cobro_derivado")
+  revisarClasificacion Boolean    @default(false) @map("revisar_clasificacion")
+  observaciones        String?    @db.Text
+
+  estado            EstadoPago @default(pendiente)
+  movimientoBancoId Int?       @unique @map("movimiento_banco_id")
+  validadoPor       Int?       @map("validado_por")
+  validadoAt        DateTime?  @map("validado_at")
+  motivoRechazo     String?    @map("motivo_rechazo") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  cobrador          Cobrador          @relation(fields: [cobradorId], references: [id])
+  bancoOrigen       Banco?            @relation("PagoBancoOrigen", fields: [bancoOrigenId], references: [id], onDelete: Restrict)
+  cuentaRecaudadora CuentaRecaudadora @relation(fields: [cuentaRecaudadoraId], references: [id])
+  tipoPago          TipoPago?         @relation(fields: [tipoPagoId], references: [id])
+  movimientoBanco   MovimientoBanco?  @relation(fields: [movimientoBancoId], references: [id])
+  validador         Usuario?          @relation("PagoValidadoPor", fields: [validadoPor], references: [id])
+  conciliacion      Conciliacion?
+
+  @@index([referencia])
+  @@index([fechaPago])
+  @@index([estado])
+  @@index([cobradorId])
+  @@index([cuentaRecaudadoraId])
+  @@index([tipoPagoId])
+  @@map("pagos_reportados")
+}
+
+model MovimientoBanco {
+  id                  Int                @id @default(autoincrement())
+  loteImportacionId   Int?               @map("lote_importacion_id")
+  cuentaRecaudadoraId Int                @map("cuenta_recaudadora_id")
+  referencia          String             @db.VarChar(60)
+  montoBs             Decimal            @map("monto_bs") @db.Decimal(18, 2)
+  // Business calendar date (no time): never shifted by timezone.
+  fechaEjecucion      DateTime           @map("fecha_ejecucion") @db.Date
+  estadoConciliacion  EstadoConciliacion @default(no_conciliado) @map("estado_conciliacion")
+  createdAt           DateTime           @default(now()) @map("created_at")
+
+  lote              LoteImportacion?  @relation(fields: [loteImportacionId], references: [id])
+  cuentaRecaudadora CuentaRecaudadora @relation(fields: [cuentaRecaudadoraId], references: [id])
+  pago              PagoReportado?
+  conciliacion      Conciliacion?
+
+  // Unique index that blocks duplicate imports of the same bank movement.
+  @@unique([cuentaRecaudadoraId, referencia, montoBs, fechaEjecucion], name: "uq_movimiento_banco")
+  @@index([referencia])
+  @@index([fechaEjecucion])
+  @@index([estadoConciliacion])
+  @@index([cuentaRecaudadoraId])
+  @@map("movimientos_banco")
+}
+
+model LoteImportacion {
+  id             Int      @id @default(autoincrement())
+  usuarioId      Int      @map("usuario_id")
+  nombreArchivo  String   @map("nombre_archivo") @db.VarChar(255)
+  filasTotales   Int      @default(0) @map("filas_totales")
+  insertadas     Int      @default(0)
+  duplicadas     Int      @default(0)
+  conError       Int      @default(0) @map("con_error")
+  detalleErrores Json?    @map("detalle_errores")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  usuario     Usuario           @relation(fields: [usuarioId], references: [id])
+  movimientos MovimientoBanco[]
+
+  @@index([usuarioId])
+  @@index([createdAt])
+  @@map("lotes_importacion")
+}
+
+model Conciliacion {
+  id                Int              @id @default(autoincrement())
+  pagoReportadoId   Int              @unique @map("pago_reportado_id")
+  movimientoBancoId Int              @unique @map("movimiento_banco_id")
+  usuarioId         Int              @map("usuario_id")
+  tipo              TipoConciliacion
+  diferenciaBs      Decimal          @default(0) @map("diferencia_bs") @db.Decimal(18, 2)
+  createdAt         DateTime         @default(now()) @map("created_at")
+
+  pagoReportado   PagoReportado   @relation(fields: [pagoReportadoId], references: [id])
+  movimientoBanco MovimientoBanco @relation(fields: [movimientoBancoId], references: [id])
+  usuario         Usuario         @relation(fields: [usuarioId], references: [id])
+
+  @@index([usuarioId])
+  @@map("conciliaciones")
+}
+
+model Gasto {
+  id                Int      @id @default(autoincrement())
+  fecha             DateTime @db.Date
+  montoBs           Decimal  @map("monto_bs") @db.Decimal(18, 2)
+  montoUsd          Decimal  @map("monto_usd") @db.Decimal(18, 2)
+  tasa              Decimal  @db.Decimal(18, 6)
+  movimientoBancoId Int?     @map("movimiento_banco_id")
+  referencia        String?  @db.VarChar(60)
+  descripcion       String   @db.VarChar(500)
+  categoria         String   @db.VarChar(100)
+  // Free-text authorizer. Mandatory by business rule (section 5.5).
+  autorizadoPor     String   @map("autorizado_por") @db.VarChar(180)
+  registradoPor     Int      @map("registrado_por")
+  soporteUrl        String?  @map("soporte_url") @db.VarChar(500)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  registrador Usuario @relation("GastoRegistradoPor", fields: [registradoPor], references: [id])
+
+  @@index([fecha])
+  @@index([categoria])
+  @@index([registradoPor])
+  @@map("gastos")
+}
+
+model TasaReferencia {
+  id        Int      @id @default(autoincrement())
+  fecha     DateTime @unique @db.Date
+  valor     Decimal  @db.Decimal(18, 6)
+  fuente    String?  @db.VarChar(120)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("tasas_referencia")
+}
+
+// Historical log of the informational BCV rate fetched from the external API.
+// Fully separate from TasaReferencia (the manual rate used for deviation).
+model TasaBcv {
+  id        Int      @id @default(autoincrement())
+  // External API uuid. Dedupe key so the hourly job never inserts duplicates.
+  apiId     String   @unique @map("api_id") @db.VarChar(64)
+  // Business date of the rate, derived from the API `date`.
+  fecha     DateTime @db.Date
+  usd       Decimal  @map("usd") @db.Decimal(18, 6)
+  fuente    String?  @db.VarChar(120)
+  // Raw timestamp returned by the API.
+  fechaApi  DateTime @map("fecha_api")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([fecha])
+  @@map("tasas_bcv")
+}
+
+model Auditoria {
+  id           Int      @id @default(autoincrement())
+  usuarioId    Int?     @map("usuario_id")
+  entidad      String   @db.VarChar(80)
+  entidadId    Int?     @map("entidad_id")
+  accion       String   @db.VarChar(60) // crear | editar | validar | rechazar | borrar | importar | login
+  datosAntes   Json?    @map("datos_antes")
+  datosDespues Json?    @map("datos_despues")
+  ip           String?  @db.VarChar(60)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  usuario Usuario? @relation(fields: [usuarioId], references: [id])
+
+  @@index([usuarioId])
+  @@index([entidad])
+  @@index([createdAt])
+  @@map("auditoria")
+}
+
+// Application parameters (tolerances, thresholds). Key/value with typed value.
+model Parametro {
+  id          Int      @id @default(autoincrement())
+  clave       String   @unique @db.VarChar(100)
+  valor       String   @db.VarChar(255)
+  descripcion String?  @db.VarChar(255)
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("parametros")
+}
+
+// In-app notifications, one row per recipient user.
+model Notificacion {
+  id        Int      @id @default(autoincrement())
+  // Recipient user.
+  usuarioId Int      @map("usuario_id")
+  tipo      String   @db.VarChar(50)
+  titulo    String   @db.VarChar(150)
+  mensaje   String   @db.VarChar(500)
+  entidad   String?  @db.VarChar(60)
+  entidadId Int?     @map("entidad_id")
+  leida     Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  usuario Usuario @relation("NotificacionDestinatario", fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId, leida])
+  @@index([usuarioId, createdAt])
+  @@map("notificaciones")
+}

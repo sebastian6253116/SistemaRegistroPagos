@@ -1,0 +1,3280 @@
+{
+  "info": {
+    "name": "Sistema de Gestion de Cobros - API",
+    "description": "Coleccion Postman v2.1 para el API del Sistema de Gestion de Cobros.\n\nVariables: baseUrl, accessToken, refreshToken. La autenticacion es Bearer a nivel de coleccion. El request de Login guarda los tokens automaticamente.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Inicia sesion (publico). Guarda accessToken y refreshToken en las variables de la coleccion.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"usuario\": \"admin\",\n  \"password\": \"Admin12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json(); pm.collectionVariables.set('accessToken', d.tokens.accessToken); pm.collectionVariables.set('refreshToken', d.tokens.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Rota el refresh token y emite un nuevo par (publico).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Revoca el refresh token (publico).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Forgot password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/forgot-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "forgot-password"
+              ]
+            },
+            "description": "Solicita la recuperacion de contrasena (publico).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@empresa.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reset password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "reset-password"
+              ]
+            },
+            "description": "Restablece la contrasena con un token (publico).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"5f2c9b7a1d3e4f60718293a4b5c6d7e8\",\n  \"password\": \"NuevaClave123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Usuario autenticado actual."
+          },
+          "response": []
+        },
+        {
+          "name": "Change password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/change-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "change-password"
+              ]
+            },
+            "description": "Cambia la contrasena del usuario autenticado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passwordActual\": \"Admin12345\",\n  \"passwordNueva\": \"NuevaClave123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Usuarios",
+      "item": [
+        {
+          "name": "Listar usuarios",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usuarios?page=1&pageSize=20&search=admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "usuarios"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": "admin"
+                }
+              ]
+            },
+            "description": "Requiere permiso: usuarios.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener usuario",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usuarios/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "usuarios",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: usuarios.ver.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Crear usuario",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/usuarios",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "usuarios"
+              ]
+            },
+            "description": "Requiere permiso: usuarios.crear.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombreCompleto\": \"Juan Perez\",\n  \"usuario\": \"jperez\",\n  \"email\": \"jperez@empresa.com\",\n  \"password\": \"Clave12345\",\n  \"rolId\": 2,\n  \"activo\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar usuario",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/usuarios/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "usuarios",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: usuarios.editar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombreCompleto\": \"Juan Perez Gomez\",\n  \"rolId\": 2,\n  \"activo\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Desactivar usuario",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usuarios/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "usuarios",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: usuarios.eliminar (soft delete).",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Roles",
+      "item": [
+        {
+          "name": "Catalogo de permisos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/roles/permisos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "roles",
+                "permisos"
+              ]
+            },
+            "description": "Requiere permiso: roles.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar roles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/roles?page=1&pageSize=20&search=admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "roles"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": "admin"
+                }
+              ]
+            },
+            "description": "Requiere permiso: roles.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener rol",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/roles/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "roles",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: roles.ver.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Crear rol",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "roles"
+              ]
+            },
+            "description": "Requiere permiso: roles.gestionar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Supervisora\",\n  \"descripcion\": \"Supervisa cobradores\",\n  \"permisos\": [\n    \"pagos.ver_todos\",\n    \"pagos.validar\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar rol",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/roles/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "roles",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: roles.gestionar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Supervisora General\",\n  \"permisos\": [\n    \"pagos.ver_todos\",\n    \"pagos.validar\",\n    \"reportes.ver\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Eliminar rol",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/roles/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "roles",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: roles.gestionar.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Cobradores",
+      "item": [
+        {
+          "name": "Listar cobradores",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cobradores?page=1&pageSize=20&search=Pedro",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cobradores"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": "Pedro"
+                }
+              ]
+            },
+            "description": "Requiere permiso: cobradores.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener cobrador",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cobradores/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cobradores",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: cobradores.ver.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Crear cobrador",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/cobradores",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cobradores"
+              ]
+            },
+            "description": "Requiere permiso: cobradores.gestionar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Pedro Rojas\",\n  \"codigo\": \"CBR-001\",\n  \"usuarioId\": 3,\n  \"activo\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar cobrador",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/cobradores/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cobradores",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: cobradores.gestionar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Pedro Rojas Diaz\",\n  \"activo\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Desactivar cobrador",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cobradores/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cobradores",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: cobradores.gestionar (soft delete).",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Bancos",
+      "item": [
+        {
+          "name": "Listar bancos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bancos?page=1&pageSize=20&search=Banco",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bancos"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": "Banco"
+                }
+              ]
+            },
+            "description": "Requiere permiso: bancos.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener banco",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bancos/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bancos",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: bancos.ver.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Crear banco",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bancos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bancos"
+              ]
+            },
+            "description": "Requiere permiso: bancos.gestionar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Banco de Venezuela\",\n  \"codigo\": \"BDV\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar banco",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/bancos/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bancos",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: bancos.gestionar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Banco de Venezuela S.A.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Eliminar banco",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bancos/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bancos",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: bancos.gestionar.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Cuentas",
+      "item": [
+        {
+          "name": "Listar cuentas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cuentas?page=1&pageSize=20&bancoId=1&activo=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cuentas"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "bancoId",
+                  "value": "1"
+                },
+                {
+                  "key": "activo",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Requiere permiso: cuentas.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener cuenta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cuentas/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cuentas",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: cuentas.ver.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Crear cuenta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/cuentas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cuentas"
+              ]
+            },
+            "description": "Requiere permiso: cuentas.gestionar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bancoId\": 1,\n  \"numeroCuenta\": \"0102-0123-45-6789012345\",\n  \"alias\": \"Cuenta principal\",\n  \"activo\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar cuenta",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/cuentas/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cuentas",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: cuentas.gestionar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"alias\": \"Cuenta operativa\",\n  \"activo\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Marcar cuenta predeterminada",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cuentas/:id/default",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cuentas",
+                ":id",
+                "default"
+              ]
+            },
+            "description": "Requiere permiso: cuentas.gestionar. Marca la cuenta como predeterminada.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Desactivar cuenta",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cuentas/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cuentas",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: cuentas.gestionar (soft delete).",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Tipos de pago",
+      "item": [
+        {
+          "name": "Listar tipos de pago",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tipos-pago?page=1&pageSize=20&activo=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tipos-pago"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "activo",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Requiere permiso: tipos_pago.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener tipo de pago",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tipos-pago/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tipos-pago",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: tipos_pago.ver.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Crear tipo de pago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tipos-pago",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tipos-pago"
+              ]
+            },
+            "description": "Requiere permiso: tipos_pago.gestionar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Pago Movil\",\n  \"descripcion\": \"Pago movil interbancario\",\n  \"activo\": true,\n  \"orden\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar tipo de pago",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tipos-pago/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tipos-pago",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: tipos_pago.gestionar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"descripcion\": \"Pago movil interbancario y mismo banco\",\n  \"orden\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Marcar tipo de pago predeterminado",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tipos-pago/:id/default",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tipos-pago",
+                ":id",
+                "default"
+              ]
+            },
+            "description": "Requiere permiso: tipos_pago.gestionar.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Desactivar tipo de pago",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tipos-pago/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tipos-pago",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: tipos_pago.gestionar (soft delete).",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Tasas",
+      "item": [
+        {
+          "name": "Listar tasas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tasas?page=1&pageSize=20&fechaDesde=2026-09-01&fechaHasta=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasas"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "fechaDesde",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "fechaHasta",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: tasas.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener tasa",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tasas/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasas",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: tasas.ver.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Crear/reemplazar tasa",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tasas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasas"
+              ]
+            },
+            "description": "Requiere permiso: tasas.gestionar (upsert por fecha).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fecha\": \"2026-09-19\",\n  \"valor\": \"36.500000\",\n  \"fuente\": \"BCV\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar tasa",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tasas/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasas",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: tasas.gestionar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"valor\": \"37.100000\",\n  \"fuente\": \"BCV\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Eliminar tasa",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tasas/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasas",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: tasas.gestionar.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "1"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Tasa BCV",
+      "item": [
+        {
+          "name": "Tasa BCV actual",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tasas-bcv/actual",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasas-bcv",
+                "actual"
+              ]
+            },
+            "description": "Requiere autenticacion. Tasa BCV informativa (puede ser null)."
+          },
+          "response": []
+        },
+        {
+          "name": "Historial tasa BCV",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tasas-bcv/historial?page=1&pageSize=20&fechaDesde=2026-09-01&fechaHasta=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasas-bcv",
+                "historial"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "fechaDesde",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "fechaHasta",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: auditoria.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Estado del job BCV",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tasas-bcv/job",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasas-bcv",
+                "job"
+              ]
+            },
+            "description": "Requiere permiso: config.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar job BCV",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tasas-bcv/job",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasas-bcv",
+                "job"
+              ]
+            },
+            "description": "Requiere permiso: config.editar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"habilitado\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sincronizar tasa BCV",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tasas-bcv/sincronizar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasas-bcv",
+                "sincronizar"
+              ]
+            },
+            "description": "Requiere permiso: config.editar. Consulta la API externa una vez."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Parametros",
+      "item": [
+        {
+          "name": "Listar parametros",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/parametros?page=1&pageSize=20&search=tolerancia",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "parametros"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": "tolerancia"
+                }
+              ]
+            },
+            "description": "Requiere permiso: config.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar varios parametros",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/parametros/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "parametros",
+                "bulk"
+              ]
+            },
+            "description": "Requiere permiso: config.editar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parametros\": [\n    {\n      \"clave\": \"tolerancia_monto_bs\",\n      \"valor\": \"0.05\"\n    },\n    {\n      \"clave\": \"umbral_antiguedad_dias\",\n      \"valor\": \"30\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar parametro",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/parametros/:clave",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "parametros",
+                ":clave"
+              ]
+            },
+            "description": "Requiere permiso: config.editar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"valor\": \"0.05\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "clave",
+                "value": "tolerancia_monto_bs"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Catalogos",
+      "item": [
+        {
+          "name": "Catalogo form-pago",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/catalogos/form-pago",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "catalogos",
+                "form-pago"
+              ]
+            },
+            "description": "Requiere autenticacion (sin permiso especifico)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Pagos",
+      "item": [
+        {
+          "name": "Reportar pago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pagos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pagos"
+              ]
+            },
+            "description": "Requiere permiso: pagos.reportar. Los montos montoBs y montoUsd deben ser estrictamente positivos: un valor no numerico, cero o negativo responde 400 \"El monto debe ser un numero positivo\".",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fechaPago\": \"2026-09-19\",\n  \"fechaDocumento\": \"2026-08-01\",\n  \"referencia\": \"12345678\",\n  \"bancoOrigenId\": 1,\n  \"cuentaRecaudadoraId\": 1,\n  \"montoBs\": \"3600.00\",\n  \"montoUsd\": \"20.00\",\n  \"cliente\": \"Juan Perez\",\n  \"concepto\": \"Pago cuota mensual\",\n  \"tipoCobro\": \"nuevo\",\n  \"tipoPagoId\": 1,\n  \"observaciones\": \"Reportado en ruta\",\n  \"cobradorId\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar pagos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pagos?page=1&pageSize=20&estado=pendiente&tipoCobro=nuevo&tipoPagoId=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pagos"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "estado",
+                  "value": "pendiente"
+                },
+                {
+                  "key": "tipoCobro",
+                  "value": "nuevo"
+                },
+                {
+                  "key": "tipoPagoId",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Requiere permiso: pagos.ver_todos o pagos.ver_propios."
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener pago",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pagos/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pagos",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: pagos.ver_todos o pagos.ver_propios.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "10"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Editar pago",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pagos/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pagos",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: pagos.reportar o pagos.editar (pago pendiente). pagos.ver_todos es de solo lectura y ya no habilita la edicion. Editar un pago validado exige ademas el permiso elevado pagos.editar (403 si falta); los pagos rechazado/duplicado responden 409. Los montos deben ser estrictamente positivos (400 si son no numericos, cero o negativos). En un pago validado se reevalua el vinculo con el movimiento bancario usando los valores nuevos: si se mantiene, se recalcula conciliaciones.diferenciaBs y se audita en la misma transaccion; si la edicion lo rompe, responde 409 sin cambiar nada (revertir la validacion primero).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"referencia\": \"87654321\",\n  \"montoBs\": \"4000.00\",\n  \"montoUsd\": \"22.00\",\n  \"tipoPagoId\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "10"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Subir comprobante de pago",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pagos/:id/soporte",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pagos",
+                ":id",
+                "soporte"
+              ]
+            },
+            "description": "Requiere permiso: pagos.reportar o pagos.editar. Multipart (imagen o PDF, max 5 MB, campo soporte); solo pagos pendientes.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "soporte",
+                  "type": "file",
+                  "src": [],
+                  "description": "Comprobante (imagen o PDF, max 5 MB)"
+                }
+              ]
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "10"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Eliminar pago",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pagos/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pagos",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: pagos.eliminar. Borrado fisico (hard delete); solo pagos NO validados (pendiente/rechazado/duplicado). Responde 409 si esta validado. La instantanea completa queda en auditoria. Sin cuerpo.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "10"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Revertir validacion de pago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pagos/:id/revertir",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pagos",
+                ":id",
+                "revertir"
+              ]
+            },
+            "description": "Requiere permiso: pagos.revertir_validacion. Inverso de la validacion: elimina la conciliacion, libera el movimiento a no_conciliado y reinicia el pago. Solo pagos validados (409 si no lo esta). motivoRechazo obligatorio si estado es rechazado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"rechazado\",\n  \"motivoRechazo\": \"Validacion revertida por error de conciliacion\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "10"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Conciliacion",
+      "item": [
+        {
+          "name": "Validar lote",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pagos/validar-lote",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pagos",
+                "validar-lote"
+              ]
+            },
+            "description": "Requiere permiso: pagos.validar_lote. Valida pares pago/movimiento en una transaccion. CR-001: un pago que coincide por referencia + monto en Bs con un movimiento YA conciliado con otro pago (posible duplicado, sin ventana de fecha) NO se valida: se reporta en `errores` con un motivo que contiene \"posible duplicado\" y queda pendiente para validacion manual.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"pagoReportadoId\": 10,\n      \"movimientoBancoId\": 25\n    },\n    {\n      \"pagoReportadoId\": 11,\n      \"movimientoBancoId\": 26\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Coincidencias de pago",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pagos/:id/coincidencias",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pagos",
+                ":id",
+                "coincidencias"
+              ]
+            },
+            "description": "Requiere permiso: pagos.validar. Devuelve `{ data, duplicado }`: `data` es el array de coincidencias puntuadas (forma original) y `duplicado` es una senal ADITIVA nullable (CR-001) con el movimiento ya conciliado con otro pago que coincide por referencia + monto en Bs (misma cuenta, sin ventana de fecha), o null si el pago no es duplicado. El contraste de referencia usa el ultimo `match.reference_suffix` (8) de la referencia reportada, o sus digitos si es mas corta, con un minimo de 4 digitos.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "10"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Validar pago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pagos/:id/validar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pagos",
+                ":id",
+                "validar"
+              ]
+            },
+            "description": "Requiere permiso: pagos.validar (movimientoBancoId opcional, usa la mejor coincidencia). CR-001: con cuerpo vacio la validacion automatica responde 409 si el pago coincide con un movimiento YA conciliado con otro pago (posible duplicado: misma cuenta y referencia + monto en Bs, sin ventana de fecha); el pago queda pendiente y hay que validarlo manualmente enviando movimientoBancoId. La via manual no se ve afectada.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"movimientoBancoId\": 25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "10"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Rechazar pago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pagos/:id/rechazar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pagos",
+                ":id",
+                "rechazar"
+              ]
+            },
+            "description": "Requiere permiso: pagos.rechazar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivoRechazo\": \"Referencia no encontrada en el extracto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "10"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Marcar duplicado",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pagos/:id/duplicado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pagos",
+                ":id",
+                "duplicado"
+              ]
+            },
+            "description": "Requiere permiso: pagos.marcar_duplicado.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "10"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Movimientos",
+      "item": [
+        {
+          "name": "Listar movimientos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/movimientos?page=1&pageSize=20&estadoConciliacion=no_conciliado&referencia=12345678",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "movimientos"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "estadoConciliacion",
+                  "value": "no_conciliado"
+                },
+                {
+                  "key": "referencia",
+                  "value": "12345678"
+                }
+              ]
+            },
+            "description": "Requiere permiso: movimientos.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener movimiento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/movimientos/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "movimientos",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: movimientos.ver.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "25"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Importacion",
+      "item": [
+        {
+          "name": "Descargar plantilla",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/importacion/plantilla",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "importacion",
+                "plantilla"
+              ]
+            },
+            "description": "Requiere permiso: movimientos.importar. Descarga la plantilla .xlsx (hoja Movimientos: encabezado + 1 fila de ejemplo)."
+          },
+          "response": []
+        },
+        {
+          "name": "Previsualizar extracto",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/importacion/preview?cuentaRecaudadoraId=1&primeraFilaEsEncabezado=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "importacion",
+                "preview"
+              ],
+              "query": [
+                {
+                  "key": "cuentaRecaudadoraId",
+                  "value": "1"
+                },
+                {
+                  "key": "primeraFilaEsEncabezado",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Requiere permiso: movimientos.importar. Multipart con el campo archivo (.xlsx, .xls o .csv).",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "archivo",
+                  "type": "file",
+                  "src": [],
+                  "description": "Extracto bancario (.xlsx, .xls o .csv)"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Confirmar importacion",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/importacion/confirmar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "importacion",
+                "confirmar"
+              ]
+            },
+            "description": "Requiere permiso: movimientos.importar. Multipart con archivo y cuentaRecaudadoraId.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "archivo",
+                  "type": "file",
+                  "src": [],
+                  "description": "Extracto bancario (.xlsx, .xls o .csv)"
+                },
+                {
+                  "key": "cuentaRecaudadoraId",
+                  "value": "1",
+                  "type": "text",
+                  "description": "Id de la cuenta recaudadora"
+                },
+                {
+                  "key": "primeraFilaEsEncabezado",
+                  "value": "true",
+                  "type": "text",
+                  "description": "true si la primera fila es encabezado"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Listar lotes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/importacion/lotes?page=1&pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "importacion",
+                "lotes"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Requiere permiso: movimientos.importar o movimientos.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener lote",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/importacion/lotes/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "importacion",
+                "lotes",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: movimientos.importar o movimientos.ver.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "3"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Errores del lote (CSV)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/importacion/lotes/:id/errores",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "importacion",
+                "lotes",
+                ":id",
+                "errores"
+              ]
+            },
+            "description": "Requiere permiso: movimientos.importar. Respuesta text/csv.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "3"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Gastos",
+      "item": [
+        {
+          "name": "Listar gastos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/gastos?page=1&pageSize=20&categoria=Transporte",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "gastos"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "categoria",
+                  "value": "Transporte"
+                }
+              ]
+            },
+            "description": "Requiere permiso: gastos.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Obtener gasto",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/gastos/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "gastos",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: gastos.ver.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "7"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Crear gasto",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/gastos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "gastos"
+              ]
+            },
+            "description": "Requiere permiso: gastos.crear.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fecha\": \"2026-09-15\",\n  \"montoBs\": \"1800.00\",\n  \"montoUsd\": \"10.00\",\n  \"descripcion\": \"Transporte a zona norte\",\n  \"categoria\": \"Transporte\",\n  \"autorizadoPor\": \"Gerencia\",\n  \"referencia\": \"GASTO-001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar gasto (PUT)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/gastos/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "gastos",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: gastos.editar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"montoBs\": \"2000.00\",\n  \"montoUsd\": \"11.00\",\n  \"descripcion\": \"Transporte a zona norte y centro\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "7"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Actualizar gasto (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/gastos/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "gastos",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: gastos.editar.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"descripcion\": \"Transporte ajustado\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "7"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Subir soporte",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/gastos/:id/soporte",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "gastos",
+                ":id",
+                "soporte"
+              ]
+            },
+            "description": "Requiere permiso: gastos.editar. Multipart (imagen o PDF, max 5 MB).",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "archivo",
+                  "type": "file",
+                  "src": [],
+                  "description": "Comprobante (imagen o PDF, max 5 MB)"
+                }
+              ]
+            },
+            "variable": [
+              {
+                "key": "id",
+                "value": "7"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Eliminar gasto",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/gastos/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "gastos",
+                ":id"
+              ]
+            },
+            "description": "Requiere permiso: gastos.eliminar.",
+            "variable": [
+              {
+                "key": "id",
+                "value": "7"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Archivos",
+      "item": [
+        {
+          "name": "Descargar archivo privado",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/uploads/:filename",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "uploads",
+                ":filename"
+              ]
+            },
+            "description": "Requiere autenticacion (Bearer) y autorizacion por archivo: comprobante de pago (pagos.ver_todos, pagos.validar o el propio cobrador) o soporte de gasto (gastos.ver). Responde 400 (traversal), 401, 403 o 404.",
+            "variable": [
+              {
+                "key": "filename",
+                "value": "1699999999999-comprobante.pdf"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Notificaciones",
+      "item": [
+        {
+          "name": "Listar notificaciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notificaciones?page=1&pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notificaciones"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Requiere autenticacion (solo las notificaciones del propio usuario)."
+          },
+          "response": []
+        },
+        {
+          "name": "Notificaciones no leidas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notificaciones/no-leidas?page=1&pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notificaciones",
+                "no-leidas"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Requiere autenticacion. Incluye el contador noLeidas."
+          },
+          "response": []
+        },
+        {
+          "name": "Marcar todas como leidas",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notificaciones/leer-todas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notificaciones",
+                "leer-todas"
+              ]
+            },
+            "description": "Requiere autenticacion. Marca como leidas todas las no leidas."
+          },
+          "response": []
+        },
+        {
+          "name": "Marcar notificacion leida",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notificaciones/:id/leida",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notificaciones",
+                ":id",
+                "leida"
+              ]
+            },
+            "description": "Requiere autenticacion (solo notificaciones propias).",
+            "variable": [
+              {
+                "key": "id",
+                "value": "12"
+              }
+            ]
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Resumen",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/resumen?fecha=2026-09-19",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "dashboard",
+                "resumen"
+              ],
+              "query": [
+                {
+                  "key": "fecha",
+                  "value": "2026-09-19"
+                }
+              ]
+            },
+            "description": "Requiere permiso: dashboard.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Serie",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/serie?dias=30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "dashboard",
+                "serie"
+              ],
+              "query": [
+                {
+                  "key": "dias",
+                  "value": "30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: dashboard.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Nuevo vs viejo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/nuevo-viejo?desde=2026-08-21&hasta=2026-09-19",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "dashboard",
+                "nuevo-viejo"
+              ],
+              "query": [
+                {
+                  "key": "desde",
+                  "value": "2026-08-21"
+                },
+                {
+                  "key": "hasta",
+                  "value": "2026-09-19"
+                }
+              ]
+            },
+            "description": "Requiere permiso: dashboard.ver."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Reportes",
+      "item": [
+        {
+          "name": "Exportar reporte",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reportes/:tipo/export?formato=excel&fechaDesde=2026-09-01&fechaHasta=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reportes",
+                ":tipo",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "formato",
+                  "value": "excel"
+                },
+                {
+                  "key": "fechaDesde",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "fechaHasta",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: reportes.exportar. Devuelve Excel (.xlsx) o PDF segun formato.",
+            "variable": [
+              {
+                "key": "tipo",
+                "value": "cobros"
+              }
+            ]
+          },
+          "response": []
+        },
+        {
+          "name": "Reporte de cobros",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reportes/cobros?page=1&pageSize=20&fechaDesde=2026-09-01&fechaHasta=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reportes",
+                "cobros"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "fechaDesde",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "fechaHasta",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: reportes.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Reporte por cobrador",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reportes/por-cobrador?page=1&pageSize=20&fechaDesde=2026-09-01&fechaHasta=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reportes",
+                "por-cobrador"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "fechaDesde",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "fechaHasta",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: reportes.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Reporte nuevo vs viejo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reportes/nuevo-viejo?page=1&pageSize=20&fechaDesde=2026-09-01&fechaHasta=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reportes",
+                "nuevo-viejo"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "fechaDesde",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "fechaHasta",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: reportes.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Reporte de tasas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reportes/tasas?page=1&pageSize=20&fechaDesde=2026-09-01&fechaHasta=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reportes",
+                "tasas"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "fechaDesde",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "fechaHasta",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: reportes.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Reporte de pendientes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reportes/pendientes?page=1&pageSize=20&fechaDesde=2026-09-01&fechaHasta=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reportes",
+                "pendientes"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "fechaDesde",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "fechaHasta",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: reportes.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Reporte de movimientos no conciliados",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reportes/movimientos-no-conciliados?page=1&pageSize=20&fechaDesde=2026-09-01&fechaHasta=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reportes",
+                "movimientos-no-conciliados"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "fechaDesde",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "fechaHasta",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: reportes.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Reporte de pagos sin respaldo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reportes/pagos-sin-respaldo?page=1&pageSize=20&fechaDesde=2026-09-01&fechaHasta=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reportes",
+                "pagos-sin-respaldo"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "fechaDesde",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "fechaHasta",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: reportes.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Reporte de flujo de caja",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reportes/flujo-caja?page=1&pageSize=20&fechaDesde=2026-09-01&fechaHasta=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reportes",
+                "flujo-caja"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "fechaDesde",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "fechaHasta",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: reportes.ver."
+          },
+          "response": []
+        },
+        {
+          "name": "Reporte de gastos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reportes/gastos?page=1&pageSize=20&fechaDesde=2026-09-01&fechaHasta=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reportes",
+                "gastos"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "fechaDesde",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "fechaHasta",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Requiere permiso: reportes.ver."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auditoria",
+      "item": [
+        {
+          "name": "Listar auditoria",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auditoria?page=1&pageSize=20&entidad=pagos_reportados&accion=validar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auditoria"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                },
+                {
+                  "key": "entidad",
+                  "value": "pagos_reportados"
+                },
+                {
+                  "key": "accion",
+                  "value": "validar"
+                }
+              ]
+            },
+            "description": "Requiere permiso: auditoria.ver."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Healthcheck",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Endpoint publico de estado del servicio."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:4000/api"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "refreshToken",
+      "value": ""
+    }
+  ]
+}

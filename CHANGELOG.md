@@ -1,0 +1,680 @@
+# CHANGELOG — Sistema de Gestión de Cobros
+
+Registro **consolidado** del ciclo de trabajo que agregó nueve funcionalidades de producto,
+la eliminación y reversión de pagos, el banco de origen opcional, la paginación real de reportes
+y el cierre de una vulnerabilidad en la descarga de archivos.
+
+> **Nota sobre el control de versiones:** este proyecto **no está bajo Git**. El registro
+> histórico lo forman las **migraciones versionadas** de `api/prisma/migrations/` y este
+> documento. Las fechas del ciclo se desprenden de los nombres de las migraciones
+> (`20260919193931` → `20260920005227`, 19–20 de septiembre de 2026). Este archivo es aditivo:
+> complementa a los tres README (`README.md`, `api/README.md`, `web/README.md`) y al contrato
+> OpenAPI, no los reemplaza.
+
+---
+
+## 1. Resumen ejecutivo
+
+| # | Iteración | Foco | Resultado principal |
+|---|---|---|---|
+| 1 | Nueve mejoras de producto + fix de caché | Cuenta y tipo de pago predeterminados, selector `Combobox`, atajo `A`, notificaciones internas, comprobante opcional, catálogo de tipos de pago, modo oscuro, tasa BCV informativa y job horario. | Nueve funcionalidades en producción y el parser de la tasa BCV bajo test: **51 tests** unitarios (antes 41). |
+| 2 | Eliminar pago + revertir validación | `DELETE /pagos/:id` y `POST /pagos/:id/revertir`, con auditoría atómica. | Dos operaciones nuevas y **2 permisos** nuevos (`pagos.eliminar`, `pagos.revertir_validacion`): de **35 a 37**. |
+| 3 | Banco de origen opcional + paginación de reportes | Columna `banco_origen_id` nullable, parámetro `pago.banco_origen_obligatorio`, normalización `"N/A"` y controles de paginación en reportes. | Se corrigió un **bug real**: la pantalla de reportes pedía siempre las primeras 20 filas e ignoraba `meta`. Ahora pagina desde el servidor con **50 filas**. |
+| 4 | Seguridad de archivos | Descarga autenticada y **autorizada por archivo**, endurecimiento de subidas y previsualización en la app. | El directorio `uploads/` dejó de servirse públicamente (`GET /uploads/...` → **404**); el contenido activo (`image/svg+xml`) dejó de aceptarse. |
+| 5 | Edición de pagos validados + restablecer filtros (CR-002) | Editar en caliente un pago `validado` con permiso propio y recálculo atómico de la conciliación; «Limpiar filtros» en las 14 secciones filtradas. | Permiso nuevo **`pagos.editar`**: de **37 a 38**; **0 endpoints nuevos** (OpenAPI sigue en **100** operaciones, Postman en **100** peticiones); **57 tests** (antes 51). |
+| 6 | Duplicados + referencia parcial (CR-001) | Detección de duplicados al validar (un pago que matchea un movimiento ya conciliado con otro pago) y contraste por referencia con piso de 4 dígitos. | **0 endpoints nuevos** (OpenAPI **100**, Postman **100**); **71 tests** (antes 57); sin estado, columna ni migración nuevos. |
+| 7 | Endurecimiento de seguridad y correctitud (auditoría de CR-002) | `Consultor` de solo lectura, brecha de permisos de `Administrativo`, monto inválido en pagos (400 en vez de 500) y `xlsx` remediado (CVE-2023-30533 / CVE-2024-22363). | **0 endpoints nuevos** (OpenAPI **100**, Postman **100**); **71 tests** sin cambios; `Administrativo` **19** permisos, catálogo total **38**. |
+| 8 | Plantilla descargable de importación bancaria (CR-003) | Endpoint `GET /api/importacion/plantilla` (ExcelJS, permiso `movimientos.importar`) y botón «Descargar plantilla» con aviso de la fila de ejemplo. | **1 endpoint nuevo**: OpenAPI **100 → 101** operaciones y Postman **100 → 101** peticiones; **71 tests** sin cambios. |
+| — | Transversal | Responsive móvil y documentación/contratos. | `mobileCard` en las **27 tablas** de la aplicación (18 archivos) y contratos sincronizados: OpenAPI **101** operaciones, Postman **101** peticiones. |
+
+---
+
+## 2. Cambios por área
+
+### 2.1 Base de datos
+
+**Migraciones aplicadas** (carpetas de `api/prisma/migrations/`, verificadas contra
+`information_schema` de la base `gestion_cobros`):
+
+| Migración | Qué introduce |
+|---|---|
+| `20260919193931_init` | Esquema base (17 tablas de aplicación, roles/permisos, catálogos, operación, auditoría y parámetros). |
+| `20260919203756_fechas_como_date` | Convierte las fechas de negocio a `DATE` sin hora: `gastos.fecha`, `movimientos_banco.fecha_ejecucion`, `pagos_reportados.fecha_pago`, `tasas_referencia.fecha`. |
+| `20260919230842_tipos_pago_notificaciones_tasas_bcv` | Crea `tipos_pago`, `tasas_bcv` y `notificaciones`; agrega a `pagos_reportados` las columnas `tipo_pago_id` (FK opcional) y `soporte_url`. |
+| `20260920005227_banco_origen_opcional` | Hace **nullable** `pagos_reportados.banco_origen_id` (`ALTER TABLE ... MODIFY banco_origen_id INTEGER NULL`). |
+
+**Tablas nuevas** (3):
+
+| Tabla | Modelo Prisma | Propósito |
+|---|---|---|
+| `tipos_pago` | `TipoPago` | Catálogo configurable de formas de pago (nombre único, descripción, activo, orden). Es un concepto **distinto** de `tipo_cobro` (nuevo/viejo); ambos coexisten. |
+| `notificaciones` | `Notificacion` | Avisos internos, una fila por destinatario. |
+| `tasas_bcv` | `TasaBcv` | Histórico informativo de la tasa del BCV, deduplicado por `api_id`. |
+
+**Columnas nuevas / modificadas** en `pagos_reportados`:
+`tipo_pago_id` (INTEGER NULL, FK a `tipos_pago`), `soporte_url` (VARCHAR(500) NULL) y
+`banco_origen_id` (pasa de `NOT NULL` a `NULL`).
+
+**Conteo verificado:** `schema.prisma` define **20 modelos/tablas de aplicación**. La base
+reporta **21** tablas porque incluye la tabla técnica `_prisma_migrations` de Prisma.
+
+### 2.2 Backend
+
+**Módulos nuevos:** `tipos-pago`, `notificaciones`, `tasas-bcv` y `archivos`
+(`api/src/modules/`). Los módulos `pagos`, `cuentas` y `conciliacion` se ampliaron.
+
+**Endpoints agregados** (rutas reales en `api/src/modules/**/*.routes.ts`):
+
+| Grupo | Endpoints |
+|---|---|
+| Tipos de pago | `GET/POST /tipos-pago`, `GET/PUT/DELETE /tipos-pago/:id` (DELETE = baja lógica: `activo = false`), `PUT /tipos-pago/:id/default` |
+| Cuentas recaudadoras | `PUT /cuentas/:id/default` |
+| Pagos | `POST /pagos/:id/soporte` (multipart, imagen/PDF, 5 MB, solo `pendiente`), `DELETE /pagos/:id`, `POST /pagos/:id/revertir` |
+| Notificaciones | `GET /notificaciones`, `GET /notificaciones/no-leidas`, `PATCH /notificaciones/:id/leida`, `PATCH /notificaciones/leer-todas` |
+| Tasa BCV | `GET /tasas-bcv/actual`, `GET /tasas-bcv/historial`, `GET /tasas-bcv/job`, `PUT /tasas-bcv/job`, `POST /tasas-bcv/sincronizar` |
+| Catálogo de formulario | `GET /catalogos/form-pago` ahora devuelve también `tiposPago`, `defaults` y `reglas: { bancoOrigenObligatorio }` |
+| Archivos | `GET /api/uploads/:filename` (reemplaza el servicio estático público) |
+
+**Job en segundo plano:** `api/src/jobs/bcv-rate.job.ts`. Consulta
+`https://api.farmavid.com.ve/api/rates` cada 60 minutos (`setInterval` en proceso), guarda solo
+tasas nuevas y **relee `bcv.job_habilitado` en cada ciclo**, por lo que activar/desactivar la
+consulta desde la UI (`PUT /tasas-bcv/job`) surte efecto **sin reiniciar**. Un fallo externo se
+registra y se descarta; nunca tumba el proceso. Solo se usa el valor `usd`.
+
+**Permisos:** `api/prisma/seed.ts` define **38 claves** (confirmado: la tabla `permisos` tiene 38
+filas). Las claves incorporadas en las iteraciones 1–4 son `pagos.eliminar` y
+`pagos.revertir_validacion`; la iteración 5 (CR-002, §8) agregó **`pagos.editar`** (de 37 a 38).
+Todas se otorgan al rol **Administrador** en el seed (`ALL`). La iteración 7 (§10) sumó
+`pagos.editar` y `pagos.revertir_validacion` al rol **Administrativo**, que queda con **19**
+permisos (antes 17); el detalle del cambio está en §10.
+
+**Parámetros:** la tabla `parametros` tiene **10 filas**. Los incorporados en este ciclo son:
+
+| Clave | Valor sembrado | Efecto |
+|---|---|---|
+| `pago.cuenta_recaudadora_default` | `1` (Banca Amiga) | Cuenta preseleccionada al registrar. |
+| `pago.tipo_pago_default` | `1` (Pago Móvil) | Tipo de pago preseleccionado. |
+| `bcv.job_habilitado` | `1` | Habilita el job horario de la tasa BCV. |
+| `pago.banco_origen_obligatorio` | `1` | `1` = banco de origen obligatorio (comportamiento previo); `0` = opcional. |
+
+**Fix de caché:** `invalidateConfigCache()` (en `api/src/lib/config-values.ts`) estaba **muerto**:
+la caché de 30 s no se invalidaba al editar un parámetro, así que un cambio tardaba hasta 30 s en
+aplicar. Ahora se invoca desde `parametros.service.ts` (update y bulkUpdate), `cuentas.service.ts`,
+`tipos-pago.service.ts` y `tasas-bcv.service.ts`, de modo que los cambios aplican de inmediato.
+
+**Auditoría:** `auditar()` en `api/src/lib/audit.ts` aceptó un parámetro opcional `tx`. Con `tx`
+**relanza** el error (para abortar la transacción del llamador); sin `tx` conserva el
+comportamiento histórico de mejor esfuerzo (nunca rompe la operación).
+
+### 2.3 Frontend
+
+| Componente / pantalla | Cambio |
+|---|---|
+| `Combobox` (`web/src/components/ui/combobox.tsx`) | Selector con búsqueda insensible a mayúsculas **y acentos** (`NFD` + strip de diacríticos), navegación por teclado (↑/↓/Home/End/Enter/Escape/Tab) y ARIA (`role="combobox"`, `listbox`, `aria-activedescendant`). Se usó para **Banco de origen** en `ReportarPage`. |
+| Notificaciones (`NotificationsPanel`) | Campana en el encabezado con contador de no leídas; consulta cada **60 s** (`UNREAD_POLL_MS = 60_000`). Al abrir un aviso de pago redirige a validación o a «Mis pagos» según permisos. |
+| Comprobante | `FilePreviewDialog` previsualiza imagen en línea o PDF embebido, con estados de carga, error + reintento y descarga; `obtenerArchivoPrivado` obtiene el archivo como **blob** por el cliente axios compartido. Se eliminaron `resolveUploadUrl` y `UPLOAD_URL`. |
+| Modo oscuro (`useTheme`) | Claro por defecto; alterna desde el encabezado, persiste en `localStorage` (`gc.theme`) y un script en línea en `index.html` aplica el tema antes del primer render. |
+| Cuenta / tipo por defecto | Configuración → Cuentas y Tipos de pago permiten «fijar como predeterminada/o»; el formulario de pago los preselecciona. |
+| Parámetros | Los parámetros booleanos conocidos (`pago.banco_origen_obligatorio`, `bcv.job_habilitado`) se renderizan como **switch** en vez de campo de texto. |
+| Atajos validación | `J`/`K` navegan, `Enter` y `A` aprueban el pago activo, `R` rechaza. |
+| Eliminar / revertir | Acciones en la bandeja y en «Mis pagos», con confirmación. La bandeja incorpora **filtro por estado** (por defecto, pendientes). |
+| Reportes | `REPORT_PAGE_SIZE = 50` con controles conectados al `meta` del servidor; al cambiar filtros o pestaña vuelve a la página 1. |
+| Responsive | `DataTable` acepta `mobileCard`; bajo `sm` renderiza tarjetas apiladas. Se usa en **las 27 tablas** (ver §4). |
+
+### 2.4 Documentación y contratos
+
+- `docs/openapi.yaml`: **100 operaciones** (incluye todos los grupos nuevos).
+- `docs/postman_collection.json`: **100 peticiones** con login automático.
+- Los tres README se actualizaron a medida que cada funcionalidad aterrizó.
+
+---
+
+## 3. Decisiones de diseño y su porqué
+
+Esta es la sección más importante para quien herede el proyecto: explica **por qué** el código es
+como es, no solo qué hace.
+
+1. **Borrado físico vs. borrado lógico de pagos.** `DELETE /pagos/:id` es un borrado **duro** y
+   solo se permite si el pago **no está `validado`** (si lo está, responde **409** e indica
+   revertir primero). Un pago no validado no tiene fila en `conciliaciones` ni `movimiento_banco_id`,
+   así que no deja referencias entrantes ni huérfanos. Se descartó el borrado lógico: obligaría a
+   filtrar una bandera en **cada** consulta de dashboard y reportes, y un solo punto olvidado
+   corrompería los agregados en silencio. La instantánea completa se guarda en la auditoría
+   (`datosAntes`).
+
+2. **Revertir la validación es el inverso exacto y va en una transacción.** Libera el movimiento
+   bancario a `no_conciliado`; sin ese paso, la regla «un movimiento ↔ un pago» lo dejaría
+   bloqueado para siempre. Además elimina la `conciliacion` y limpia `movimientoBancoId`,
+   `validadoPor`, `validadoAt` y `motivoRechazo`.
+
+3. **Atomicidad de la auditoría vía `tx`.** Como el borrado es irreversible, la entrada de
+   auditoría es el único rastro que sobrevive. Por eso `auditar()` acepta un `tx`: dentro de una
+   transacción **relanza** el error, de modo que si no se puede auditar, **no se borra**. Fuera de
+   una transacción mantiene el comportamiento de mejor esfuerzo para no romper operaciones.
+
+4. **Columna nullable vs. banco «N/A» ficticio.** `banco_origen_id` se hizo `NULL` en lugar de
+   sembrar una fila «N/A» en el catálogo: una fila fantasma contaminaría `bancos` y los filtros de
+   reportes, y obligaría a excluirla en cada consulta.
+
+5. **Contrato de normalización `"N/A"`.** La API **nunca** devuelve un nombre de banco nulo en las
+   respuestas de pagos: normaliza a `bancoOrigen: { id: null, nombre: "N/A", codigo: "N/A" }`.
+   Es una decisión deliberada de contrato: las superficies (web, reportes, exportaciones) reciben
+   siempre un string estable y no necesitan un caso especial. La web añade además un `?? 'N/A'`
+   defensivo.
+
+6. **Payload sin centinelas.** Cuando el banco de origen es opcional y no se selecciona, el
+   formulario **omite** `bancoOrigenId` por completo (no envía `null`, no envía un id falso). El
+   esquema Zod lo admite como opcional/nullable, y `PUT` lo trata como actualización parcial: un
+   campo ausente conserva el banco; `null` lo limpia. La regla se evalúa sobre el valor resultante.
+
+7. **Blob + previsualización en la app vs. URL firmada vs. pestaña nueva.** El JWT vive en
+   `localStorage` y lo adjunta un interceptor de axios, así que un `<a href>` directo **no puede**
+   autenticarse. Las URLs firmadas se descartaron porque exponen un token en la URL y en los logs;
+   abrir una pestaña nueva se descartó porque los bloqueadores de popups matan la navegación
+   posterior a un `await`. La solución es obtener el archivo como **blob** y previsualizarlo en un
+   `FilePreviewDialog`. Consecuencia de UX: «Ver comprobante» abre un modal en la app en vez de
+   una pestaña del navegador.
+
+8. **Job en proceso vs. programador externo.** El job BCV es un `setInterval` del propio backend,
+   no un cron/cola externo: el alcance no justifica infraestructura adicional y permite leer el
+   flag de habilitación en **cada tick** (activar/desactivar sin reiniciar).
+
+9. **Polling vs. websockets para notificaciones.** Polling cada 60 s: sin conexión persistente ni
+   infraestructura de publicación/suscripción, suficiente para el volumen del sistema.
+
+10. **La tasa BCV vive en su propia tabla (`tasas_bcv`) y es solo informativa.** Es un histórico
+    automático, **separado** de `tasas_referencia` (tasa manual contra la que se mide la
+    desviación). **Nunca** alimenta la tasa derivada del formulario: la tasa del pago sigue siendo
+    siempre `monto_bs / monto_usd`.
+
+11. **Fix de `invalidateConfigCache`.** Ver §2.2: era código muerto y se conectó a las escrituras
+    de parámetros para que las ediciones apliquen de inmediato.
+
+12. **Responsive con un solo componente de tabla.** En lugar de duplicar `DataTable`, se le agregó
+    un `mobileCard` opcional; así las tarjetas apiladas y la tabla comparten paginación, orden y
+    lógica.
+
+---
+
+## 4. Verificación
+
+### 4.1 Lo ejecutado (runtime)
+
+- **Tests unitarios:** `npm test` en `api/` → **57 tests en verde**, 5 archivos
+  (`bcv` 10, `classification` 6, `money` 10, `matcher` **17**, `parser` 14). El parser de la
+  respuesta BCV (`bcv`) es nuevo en las iteraciones 1–4; los 6 casos extra de `matcher` son de la
+  iteración 5 (CR-002, §8.5). Conteo antes de CR-002: 51.
+- **Base de datos:** las 4 migraciones están aplicadas y el esquema real coincide con
+  `schema.prisma` (por ejemplo `banco_origen_id` es `NULL`-able en `information_schema`).
+- **Conteo de endpoints reconciliado:** **100** operaciones = **99** definiciones
+  `router.{get,post,put,patch,delete}` repartidas en 20 archivos `*.routes.ts` + `GET /health`
+  público (montado en `api/src/app.ts`). Coincide con `openapi.yaml` (100 `operationId`, 100
+  métodos) y `postman_collection.json` (100 `request`).
+- **`mobileCard`:** **27** usos, exactamente **27** usos de `<DataTable` en 18 archivos → *todas*
+  las tablas lo proveen.
+
+### 4.2 Verificado por lectura / inspección
+
+- Rutas, controladores, servicios y esquemas Zod de los módulos nuevos y ampliados.
+- `auditar()` (parámetro `tx` y comportamiento de relanzar), `upload.ts` (lista blanca MIME,
+  extensión derivada del MIME, límite de 5 MB), `archivos.service.ts` (traversal y autorización),
+  `bcv-rate.job.ts` (flag por tick) y `config-values.ts` (caché e invalidación).
+- Frontend: `Combobox`, `FilePreviewDialog`, `useTheme`, `Topbar`, `ParametrosTab`,
+  `ReportesPage`, `ValidacionPage`.
+- READMEs y contratos contra el código.
+
+### 4.3 Matriz de autorización de archivos (`GET /api/uploads/:filename`)
+
+| Archivo referenciado por | Permiso requerido | Resultado |
+|---|---|---|
+| Comprobante de un pago | `pagos.ver_todos` o `pagos.validar` o ser el cobrador dueño | 200 |
+| Soporte de un gasto | `gastos.ver` | 200 |
+| Comprobante de un pago, sin permiso | — | 403 |
+| Referenciado por ningún registro (huérfano) | — | 404 (no se filtra su existencia) |
+| Sin token Bearer | — | 401 |
+| Nombre con traversal (`..`, separadores, control) | — | 400 |
+| Extensión fuera de la lista blanca | — | 404 |
+
+### 4.4 Evidencia de datos dejada por pruebas manuales
+
+La base contiene filas que indican corridas de verificación previas, no solo el seed:
+`pagos_reportados` 59, `movimientos_banco` 59, `conciliaciones` 50, `gastos` 12,
+`notificaciones` 11, `tasas_bcv` 1, `bancos` 13, `tipos_pago` 5.
+
+### 4.5 Qué **no** se re-ejecutó en esta pasada
+
+No se volvieron a correr flujos HTTP de punta a punta contra la base viva (aprobación de build,
+login y encadenado de peticiones reales). Todo lo anterior es lectura de código, inspección de
+esquema/base y la suite de tests unitarios. No existe aún una suite de integración (ver §6).
+
+---
+
+## 5. Limitaciones conocidas
+
+1. **Dos tablas agregadas de reportes no se paginan del lado del servidor.** En **Análisis de
+   tasa → Por cobrador** y **Gastos → Por autorizante** las sub-consultas del backend no devuelven
+   `meta`, así que muestran su conjunto completo. Las tablas **principales** de cada reporte sí
+   paginan (50 filas).
+2. **El aviso de validación/rechazo va al cobrador enlazado, no a un «reportado por».** Se
+   resuelve por `Cobrador.usuarioId` (`crearParaCobrador`), porque **no existe** un campo «reportado
+   por». Consecuencia: si un administrador reporta un pago **en nombre de** un cobrador, la
+   notificación de validación/rechazo llega al **cobrador**, no a quien lo reportó.
+3. **`docs/schema.sql` no refleja la última migración.** El script SQL del esquema sigue con
+   `` `banco_origen_id` INTEGER NOT NULL `` en `pagos_reportados`, mientras que la migración
+   `20260920005227_banco_origen_opcional` y la base real lo tienen **nullable**. Es un artefacto
+   derivado y debe regenerarse; la fuente de verdad es `schema.prisma` + las migraciones.
+4. **Las notificaciones se crean por destinatario y por evento.** Reportar un pago inserta una
+   fila por cada usuario activo con `pagos.validar`; un cambio de rol o un alta posterior no
+   reciben avisos de eventos pasados.
+5. **Los archivos viven en disco local** (`UPLOAD_DIR`); no hay almacenamiento externo ni
+   redundancia.
+
+---
+
+## 6. Pendientes / próximos pasos
+
+1. **Tests de integración HTTP.** `supertest` (`^7.0.0`) y `@types/supertest` ya figuran en
+   `api/package.json` pero **no se usan**: no hay ninguna suite que ejercite los endpoints de
+   punta a punta.
+2. **Envío real de correo** para la recuperación de contraseña. Hoy, sin servicio de correo, el
+   token se devuelve **solo si `NODE_ENV !== 'production'`**; en producción el flujo no está
+   implementado.
+3. **Almacenamiento externo** para soportes y comprobantes (objeto/S3), en lugar de disco local.
+4. **Limpieza de filas de verificación.** Purgar la auditoría y los refresh tokens generados por
+   las corridas de prueba (`auditoria` 127 filas, `refresh_tokens` 91 filas al cierre de este
+   registro).
+5. **Regenerar `docs/schema.sql`** para que acompañe a la migración de banco de origen opcional.
+6. **Evaluar la paginación server-side** de las dos tablas agregadas de reportes (§5.1).
+
+---
+
+## 7. Cómo levantar el proyecto
+
+Requisitos, puesta en marcha, variables de entorno, usuarios de prueba y reglas de negocio están
+en el [`README.md`](./README.md) de la raíz. Resumen mínimo:
+
+```powershell
+# Base de datos (XAMPP encendido)
+& "C:\xampp\mysql\bin\mysql.exe" -u root -e "CREATE DATABASE IF NOT EXISTS gestion_cobros CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+# Backend
+cd api; Copy-Item .env.example .env; npm install; npx prisma migrate deploy; npm run seed; npm run dev
+
+# Frontend (otra terminal)
+cd web; Copy-Item .env.example .env; npm install; npm run dev
+```
+
+- Backend: `http://localhost:4000` · healthcheck `GET /health`
+- Frontend: `http://localhost:5173`
+- Documentación de API: [`docs/openapi.yaml`](./docs/openapi.yaml) · Colección Postman:
+  [`docs/postman_collection.json`](./docs/postman_collection.json)
+
+---
+
+## 8. Iteración 5 — CR-002: edición de pagos validados y restablecer filtros
+
+Registro **prospectivo** original en [`CAMBIOS-SOLICITADOS.md`](./CAMBIOS-SOLICITADOS.md) (CR-002).
+Esta iteración **sí cambió código** (`api/src`, `api/prisma`, `web/src`), a diferencia de lo que ese
+documento asumía al redactarse.
+
+### 8.1 Qué pedía el negocio
+
+> «…poder editar pagos ya validados…, desde la bandeja de validación quiero también editar y
+> modificar el estado de validación de un pago con el permiso de editar pago…, y un botón que deje
+> restablecer el filtro en cada una de las secciones.»
+
+El pedido tenía tres requisitos genuinamente nuevos: **R1** restablecer filtros, **R3** editar los
+**datos** de un pago ya `validado` y **R4/R5** una acción de edición en la bandeja con **permiso
+propio**. «Revertir la validación» (R2) y la auditoría (R6) ya existían de la iteración 2 y se
+reutilizaron.
+
+### 8.2 Backend
+
+- **Permiso nuevo `pagos.editar`** (`api/prisma/seed.ts`): descripción «Editar pagos, incluidos los
+  ya validados», concedido al rol **Administrador** vía `ALL`; el rol `Administrativo` **no** lo
+  recibe. Total de permisos: **37 → 38** (verificado: `SELECT COUNT(*) FROM permisos` = 38). Los
+  permisos se **siembran**, no requieren migración.
+- **`editarPago()`** (`api/src/modules/pagos/pagos.service.ts`) reescrito con tres caminos:
+  - `pendiente` → idéntico a antes (el cobrador edita los propios; auditoría fuera de transacción).
+  - `validado` → exige `pagos.editar` (**403** si falta) y edita **en caliente** dentro de una
+    transacción; `rechazado`/`duplicado` → **409**.
+- **Re-evaluación del vínculo:** nueva función pura `evaluarVinculoConciliacion()` en
+  `api/src/modules/conciliacion/matcher.ts`. Reutiliza `calcularPuntaje()` (no duplica la lógica de
+  match) y agrega el invariante de cuenta: `movimiento.cuentaRecaudadoraId === pago.cuentaRecaudadoraId`.
+  Devuelve `null` cuando la edición rompe el vínculo (referencia, monto fuera de tolerancia, fecha
+  fuera de la ventana o cuenta distinta).
+- **Atomicidad:** si el vínculo se mantiene, la transacción actualiza el pago, recalcula
+  `conciliaciones.diferenciaBs = montoBs - movimiento.montoBs` y escribe la auditoría
+  (`datosAntes`/`datosDespues`, con la diferencia) usando el `tx` de `auditar()`. Si el vínculo se
+  rompe, **no se escribe nada** y responde **409** nombrando el movimiento en conflicto.
+- **El guard de la ruta NO cambió** (`api/src/modules/pagos/pagos.routes.ts`): `PUT /pagos/:id`
+  sigue con `requirePermiso.some('pagos.reportar', 'pagos.ver_todos')`. Reemplazarlo por
+  `requirePermiso('pagos.editar')` habría roto la edición que el **cobrador** hace de sus pagos
+  `pendiente`; el permiso elevado se exige **dentro del servicio**.
+- **0 endpoints nuevos:** las operaciones OpenAPI quedan en **100** y las peticiones Postman en
+  **100**.
+
+### 8.3 Frontend
+
+- **`EditarPagoDialog`** (`web/src/features/pagos/EditarPagoDialog.tsx`): diálogo de edición
+  extraído de `MisPagosPage` a un componente compartido. Sobre un pago `validado` muestra un aviso
+  de que la conciliación se re-evalúa al guardar y que, si se rompe, deberá revertirse primero.
+- **`MisPagosPage`**: un usuario con `pagos.editar` ahora ve «Editar» también sobre pagos
+  `validado` (`pago.estado === 'pendiente' || (pago.estado === 'validado' && puedeEditarValidado)`).
+- **`ValidacionPage`**: acción **«Editar pago»** (permiso `pagos.editar`) sobre pagos `pendiente` y
+  `validado`, tanto en la fila/tarjeta como en el panel del pago activo; reutiliza `EditarPagoDialog`.
+- **`ClearFiltersButton`** (`web/src/components/common/ClearFiltersButton.tsx`): primitivo
+  compartido con un hook `useActiveFilters(current, initial)` que compara por **valor** (firma
+  estable, independiente del orden de claves e identidad del objeto) y el botón «Limpiar filtros»,
+  **deshabilitado** cuando no hay filtro activo. Adoptado en **14 secciones**: Mis pagos,
+  Validación, Movimientos, Gastos, Auditoría, Historial BCV, Reportes y las 7 pestañas de
+  Configuración. En todas, limpiar devuelve los filtros a su valor inicial y **reinicia a la
+  página 1**.
+
+### 8.4 Decisiones de diseño y su porqué (CR-002)
+
+1. **Editar en caliente vs. exigir revertir primero (D7).** Se eligió editar sin revertir y
+   **recalcular** la conciliación en la misma transacción; obligar a revertir → editar → revalidar
+   habría multiplicado los pasos para correcciones triviales (p. ej. un `cliente` mal escrito).
+2. **Si la edición rompe el match, se bloquea (D9).** **409** con el movimiento en conflicto en
+   lugar de desvincular en silencio: dejar un pago `validado` con un vínculo roto corrompería los
+   agregados sin señal. La alternativa —soltar el vínculo— cambiaría estado y conciliación sin que
+   el validador lo pida.
+3. **Permiso propio `pagos.editar` (D8) en vez de reutilizar `pagos.revertir_validacion`.** El
+   pedido habla del «mismo permiso de edición»; separar edición de reversión permite conceder una
+   sin la otra.
+4. **El guard de la ruta se mantiene permisivo.** El permiso elevado se verifica en el servicio
+   porque la edición de un `pendiente` por el cobrador no debe exigirlo.
+5. **Primitivo compartido de filtros (D5).** Con 14 secciones, 14 botones copiados se
+   desincronizan y el próximo filtro que se agregue se olvida; un solo primitivo concentra el
+   comportamiento (`disabled` por valor) y el estilo.
+
+### 8.5 Verificación
+
+- **Tests unitarios:** `npm test` en `api/` → **57 tests en verde** (5 archivos). `matcher.test.ts`
+  pasó de 11 a **17** casos: 6 nuevos para `evaluarVinculoConciliacion` (2 que conservan el vínculo
+  y 4 que lo bloquean: monto fuera de tolerancia, referencia distinta, fecha fuera de la ventana y
+  cuenta recaudadora distinta).
+- **Base de datos:** `SELECT COUNT(*) FROM gestion_cobros.permisos` → **38** (antes 37).
+- **Contratos:** `docs/openapi.yaml` → **100** operaciones; `docs/postman_collection.json` → **100**
+  peticiones. Sin endpoints nuevos.
+- **Frontend:** `ClearFiltersButton` importado/instanciado en **14** archivos de `web/src`.
+- Verificado por **lectura de código** (`pagos.service.ts`, `pagos.routes.ts`, `matcher.ts`,
+  `seed.ts`, `EditarPagoDialog.tsx`, `ValidacionPage.tsx`, `MisPagosPage.tsx`,
+  `ClearFiltersButton.tsx`) y por consulta directa a la base; no se re-ejecutaron flujos HTTP de
+  punta a punta (sigue sin haber suite de integración, ver §6.1).
+
+### 8.6 Limitaciones de esta iteración
+
+- **Solo se editan los campos que expone el diálogo** (`referencia`, `montoBs`, `montoUsd`,
+  `cliente`, `concepto`). A nivel de servicio el `PUT` admite más campos (`cuentaRecaudadoraId`,
+  `fechaPago`, etc.), pero la UI no los ofrece todavía.
+- **El diálogo de edición no permite cambiar el `estado`** del pago; el cambio de estado sigue por
+  las acciones de validar/rechazar/revertir/marcar duplicado.
+- La detección del vínculo roto depende de los parámetros vigentes (`match.amount_tolerance_bs`,
+  `match.date_window_days`, `match.reference_suffix`): editar con una configuración distinta a la
+  del momento de validar puede bloquear una corrección legítima. Es deliberado (el vínculo se juzga
+  con las reglas actuales).
+
+### 8.7 Archivos de esta iteración
+
+- `api/prisma/seed.ts` — permiso `pagos.editar` (38 total).
+- `api/src/modules/pagos/pagos.service.ts` — `editarPago()` con edición de validados.
+- `api/src/modules/conciliacion/matcher.ts` — `evaluarVinculoConciliacion()`.
+- `api/src/modules/conciliacion/...` — `matcher.test.ts` +6 casos.
+- `web/src/components/common/ClearFiltersButton.tsx` — primitivo de reset (nuevo).
+- `web/src/features/pagos/EditarPagoDialog.tsx` — diálogo de edición compartido (nuevo).
+- `web/src/features/pagos/MisPagosPage.tsx`, `web/src/features/validacion/ValidacionPage.tsx` y 12
+  secciones más de `web/src` — adopción de edición/limpiar filtros.
+- `docs/openapi.yaml`, `docs/postman_collection.json`, los tres README y este CHANGELOG —
+  sincronización de la documentación (esta iteración documental).
+
+---
+
+## 9. Iteración 6 — CR-001: referencia parcial (piso de 4 dígitos) y duplicados a validación manual
+
+Registro **prospectivo** original en [`CAMBIOS-SOLICITADOS.md`](./CAMBIOS-SOLICITADOS.md) (CR-001).
+Esta iteración **sí cambió código** (`api/src`, `web/src`), a diferencia de lo que ese documento
+asumía al redactarse. **No** hubo esquema, migración ni estado nuevos.
+
+### 9.1 Qué pedía el negocio
+
+> «…si los cobradores colocan ya sea la referencia completa o los últimos 4 dígitos…, siempre y
+> cuando coincidan tanto los últimos 4 dígitos como el monto en Bs. Y si este pago indica que está
+> duplicado, quiero que quede pendiente por validar y sea la persona que se encarga de validar los
+> pagos quien realice la validación manual.»
+
+Tres requisitos: **R1** referencia completa **o** 4 dígitos, **R2** referencia **y** monto, y
+**R3** —el corazón— un duplicado **no** se cierra automáticamente: queda `pendiente` para
+validación manual.
+
+### 9.2 Backend
+
+- **Contraste por referencia con piso** (`api/src/modules/conciliacion/matcher.ts`).
+  `normalizarReferencia()` reduce a dígitos; `sufijoReferencia()` toma el último
+  `match.reference_suffix` (**8**) o la referencia completa si es más corta; `MIN_DIGITOS_CONTRASTE
+  = 4` es el piso: una referencia con menos de 4 dígitos **no** matchea por sufijo, solo por
+  igualdad exacta. `referenciasCoinciden()` compara en doble sentido
+  (`db.endsWith(sa) || da.endsWith(sb) || sa === sb`).
+- **Duplicado** (`buscarDuplicado` + `coincideReferenciaMonto`). Un pago es duplicado cuando
+  coincide por referencia (misma regla) **y** monto en Bs dentro de `match.amount_tolerance_bs`
+  con un movimiento **ya conciliado con otro pago**, en la **misma cuenta recaudadora**. La
+  **ventana de fecha se excluye a propósito**: el reporte duplicado suele traer una fecha
+  equivocada, y esa fecha es el origen del duplicado.
+- **`validarPago()` bloquea la vía automática.** Sin `movimientoBancoId`, si hay duplicado lanza
+  **409** y no valida; el pago permanece `pendiente`. Con `movimientoBancoId` (vía manual) sigue
+  funcionando igual.
+- **`validarLote()` reporta duplicados** dentro del array `errores` existente (motivo con «posible
+  duplicado») y no los valida; usa el `tx` de la transacción para ver los movimientos ya
+  conciliados dentro del mismo lote.
+- **`obtenerCoincidencias()` devuelve `{ coincidencias, duplicado }`**; el controlador
+  (`api/src/modules/pagos/pagos.controller.ts`) responde `{ data, duplicado }`, conservando la
+  forma original del array `data`.
+- **Sin estado, sin migración.** El duplicado se **calcula al vuelo**; no hay columna, estado ni
+  migración nuevos.
+- **0 endpoints nuevos:** OpenAPI queda en **100** operaciones y Postman en **100** peticiones.
+
+### 9.3 Frontend
+
+- **Tipos `DuplicadoInfo` / `CoincidenciasResultado`** (`web/src/types/index.ts`) y
+  `getCoincidencias()` devolviendo `{ data, duplicado }` (`web/src/api/pagos.ts`).
+- **`DuplicadoAviso`** (`web/src/features/validacion/ValidacionPage.tsx`): aviso prominente
+  («Posible duplicado», `role="alert"`) con la referencia y el monto del movimiento y el id del
+  pago con el que ya está conciliado.
+- **Intercepción de la vía automática:** `validarAutomatico()` y `aprobarActivo()` —y por tanto el
+  botón «Validar» y los atajos `Enter`/`A`— no disparan la petición si hay duplicado; muestran un
+  aviso y guían a la validación manual («Validar con este movimiento»). La validación en lote
+  muestra el conteo de duplicados entre los errores.
+
+### 9.4 Decisiones (resueltas por defecto)
+
+- **D1 — qué es un duplicado.** RESUELTA: «el movimiento bancario ya está conciliado con otro
+  pago». Se descartan (diferidos) el doble reporte del mismo cobrador y el cruce entre cobradores.
+- **D2 — monto exacto vs. tolerancia.** **Por defecto: se mantiene la tolerancia
+  `match.amount_tolerance_bs = 0.01`** (verificado en la base). El dueño del producto puede
+  cambiarla a comparación exacta si lo pide.
+- **D3 — ¿sobrevive la validación automática?** **Por defecto: SÍ** para una coincidencia única y
+  no duplicada; solo los duplicados dejan de cerrarse automáticamente. Overridable por el negocio.
+- **D4 — ¿se persiste la señal?** **Por defecto: se calcula al vuelo**, sin persistencia,
+  migración ni estado nuevo. Overridable por el negocio (exigiría columna/estado + migración).
+- Todas son decisiones **tomadas por defecto** por el equipo técnico; el dueño del producto puede
+  revisarlas.
+
+### 9.5 Verificación
+
+- **Tests unitarios:** `npm test` en `api/` → **71 tests en verde** (6 archivos).
+  `matcher.test.ts` pasó de 17 a **27** casos (10 nuevos: normalización, piso de 4 dígitos y
+  `coincideReferenciaMonto` sin ventana de fecha).
+- **Base de datos:** `match.amount_tolerance_bs = 0.01`, `match.date_window_days = 3`,
+  `match.reference_suffix = 8` (sin cambios).
+- **Contratos:** `docs/openapi.yaml` → **100** operaciones; `docs/postman_collection.json` → **100**
+  peticiones. Sin endpoints nuevos.
+- **Smoke test en vivo** (API en `:4000`, pago 2 = ref `12345678`, Bs 3600, cuenta 1):
+  `GET /api/pagos/2/coincidencias` devuelve `duplicado` apuntando al movimiento **1** (ya
+  conciliado con el pago 1) con `data = []`, y `POST /api/pagos/2/validar` con cuerpo vacío
+  responde **409** sin cambiar el pago.
+- Verificado por **lectura de código** (`matcher.ts`, `conciliacion.service.ts`,
+  `pagos.controller.ts`, `matcher.test.ts`, `ValidacionPage.tsx`, `types/index.ts`, `api/pagos.ts`)
+  y por consulta directa a la base.
+
+### 9.6 Limitaciones de esta iteración
+
+- El contraste de referencia usa el último `match.reference_suffix` (**8**) **de la referencia
+  reportada**, no siempre 4 dígitos. Reportar la referencia completa y reportar solo sus últimos 4
+  dígitos **no** garantiza el mismo conjunto de candidatos: una referencia más corta amplía el
+  predicado de sufijo. Lo que sí se cumple es que **ambas formas pueden matchear** el mismo
+  movimiento (por igualdad exacta la primera, por sufijo la segunda, siempre con ≥ 4 dígitos).
+- La detección de duplicado solo mira movimientos **ya conciliados**; no detecta el doble reporte
+  de una misma transacción cuando todavía no está conciliada (fuera de alcance por D1).
+
+### 9.7 Archivos de esta iteración
+
+- `api/src/modules/conciliacion/matcher.ts` — `MIN_DIGITOS_CONTRASTE`, `normalizarReferencia`,
+  `sufijoReferencia`/`referenciasCoinciden` con piso de 4, `coincideReferenciaMonto`,
+  `buscarDuplicado`.
+- `api/src/modules/conciliacion/conciliacion.service.ts` — `obtenerCoincidencias` devuelve
+  `{ coincidencias, duplicado }`; `validarPago` y `validarLote` bloquean/reportan duplicados.
+- `api/src/modules/pagos/pagos.controller.ts` — `coincidencias` responde `{ data, duplicado }`.
+- `api/tests/matcher.test.ts` — +10 casos del CR-001.
+- `web/src/types/index.ts`, `web/src/api/pagos.ts`,
+  `web/src/features/validacion/ValidacionPage.tsx` — consumo y aviso de duplicado.
+- `docs/openapi.yaml`, `docs/postman_collection.json`, los tres README, `CAMBIOS-SOLICITADOS.md` y
+  este CHANGELOG — sincronización documental.
+
+---
+
+## 10. Iteración 7 — Endurecimiento de seguridad y correctitud (auditoría de CR-002)
+
+Ronda de endurecimiento posterior a CR-001/CR-002, **sin funcionalidad de producto nueva**: cierra
+hallazgos de autorización, de permisos sembrados, de validación de montos y de dependencias.
+**0 endpoints nuevos** (OpenAPI sigue en **100** operaciones, Postman en **100** peticiones) y
+**71 tests** sin cambios (no se agregaron casos en esta ronda).
+
+### 10.1 Qué se corrigió
+
+1. **`Consultor` estrictamente de solo lectura.** En `api/src/modules/pagos/pagos.routes.ts` las dos
+   rutas de escritura dejaron de exigir `pagos.ver_todos` (permiso de **LECTURA**) y pasaron a
+   exigir `requirePermiso.some('pagos.reportar','pagos.editar')`:
+   - `PUT /pagos/{id}` (antes `some('pagos.reportar','pagos.ver_todos')`);
+   - `POST /pagos/{id}/soporte` (antes `some('pagos.reportar','pagos.ver_todos')`).
+   Las dos rutas GET que legítimamente usan `some('pagos.ver_todos','pagos.ver_propios')` **no**
+   cambiaron. `pagos.ver_todos` ya **no** concede escritura en ningún punto. El servicio
+   (`editarPago`, `pagos.service.ts`) sigue exigiendo `pagos.editar` para editar un pago `validado`.
+2. **Brecha de permisos de `Administrativo`.** En `api/prisma/seed.ts` el rol `Administrativo` ganó
+   `pagos.editar` y `pagos.revertir_validacion`: pasa a **19** permisos. `Consultor` queda igual en
+   **10** (conserva `pagos.ver_todos`, sin `pagos.editar`). `Administrador` **38** (todos),
+   `Cobrador` **3**; el catálogo total sigue en **38** claves.
+3. **Monto inválido en pagos → 400, no 500.** El helper compartido `decimalString` de
+   `api/src/modules/pagos/pagos.schema.ts` rechaza valores no numéricos y no positivos con el
+   mensaje `El monto debe ser un numero positivo`; aplica a `reportarPagoSchema` y a
+   `editarPagoSchema` (`montoBs`/`montoUsd`). Antes un valor no numérico o `<= 0` llegaba a
+   `calcularTasa()` y afloraba como **500**.
+4. **`xlsx` remediado (CVE-2023-30533 y CVE-2024-22363).** `api/package.json` pasó de `^0.18.5` a la
+   compilación parcheada publicada por SheetJS `0.20.3`
+   (`https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`, confirmado en `package-lock.json`). El
+   consumidor es `api/src/modules/importacion/parser.ts` (importa `* as XLSX from 'xlsx'` y acepta
+   `.xlsx`/`.csv`).
+5. **Gate de edición del frontend alineado.** En `web/src/features/pagos/MisPagosPage.tsx` un pago
+   `pendiente` es editable con `pagos.reportar` **o** `pagos.editar`; un pago `validado` solo con
+   `pagos.editar` (helper `puedeEditarPago`). La bandeja de validación (`ValidacionPage`) mantiene
+   su gate propio: editar requiere `pagos.editar`.
+
+### 10.2 Verificación
+
+- **Tests unitarios:** `npm test` en `api/` → **71 tests en verde** (6 archivos), sin cambios.
+- **Base de datos (SQL):** Administrador **38**, Administrativo **19**, Cobrador **3**, Consultor
+  **10**; tabla `permisos` **38**.
+- **Contratos:** `docs/openapi.yaml` → **100** operaciones; `docs/postman_collection.json` → **100**
+  peticiones. Sin endpoints nuevos.
+- **Gastos (prueba dirigida):** `crear()` con `montoBs = 0` o `montoUsd = 0` responde **400**
+  (`El monto en Bs debe ser mayor a 0` / `El monto en USD debe ser mayor a 0`), no 500.
+
+### 10.3 Inconsistencia conocida (no corregida)
+
+- **Dos helpers de dinero distintos.** `pagos.schema.ts` endureció `decimalString` (positivo
+  estricto), pero `gastos.schema.ts` conserva su helper `monto` (regex que permite `0`) y su propio
+  mensaje. **No** produce un 500: `gastos.service.ts` envuelve `calcularTasa` en `try/catch` y lo
+  traduce a **400** (verificado ejecutando `crear()` con montos en cero). Queda como deuda de
+  consistencia: unificar ambos helpers (mismo regex y mismo mensaje) para que el rechazo ocurra en
+  el esquema y no en el servicio. Fuera del alcance de esta ronda.
+
+### 10.4 Archivos de esta iteración
+
+- `api/src/modules/pagos/pagos.routes.ts` — guard de escritura `some('pagos.reportar','pagos.editar')`.
+- `api/prisma/seed.ts` — `Administrativo` con `pagos.editar` y `pagos.revertir_validacion` (19).
+- `api/src/modules/pagos/pagos.schema.ts` — `decimalString` estricto.
+- `api/package.json` — `xlsx` `0.20.3` desde el CDN de SheetJS.
+- `web/src/features/pagos/MisPagosPage.tsx` — gate `puedeEditarPago`.
+- `docs/openapi.yaml`, `docs/postman_collection.json`, los tres README, `CAMBIOS-SOLICITADOS.md` y
+  este CHANGELOG — sincronización documental.
+
+---
+
+## 11. Iteración 8 — Plantilla descargable para la importación bancaria (CR-003)
+
+A diferencia de las iteraciones 6 y 7, esta **sí agrega un endpoint**, así que **los conteos de
+contrato cambian**: OpenAPI **100 → 101** operaciones y Postman **100 → 101** peticiones. Registro
+prospectivo original en [`CAMBIOS-SOLICITADOS.md`](./CAMBIOS-SOLICITADOS.md) (CR-003).
+
+### 11.1 Qué se solicitó
+
+> «Que en el proceso de importación bancaria se pueda descargar una plantilla Excel para que los
+> usuarios carguen el archivo en el formato correcto.»
+
+Un solo requisito funcional: **ofrecer una plantilla `.xlsx` descargable** con el formato que espera
+el importador, con **una fila de ejemplo** que sirva de guía y que el usuario reemplace o elimine.
+
+### 11.2 Backend
+
+- **Endpoint nuevo** `GET /api/importacion/plantilla`
+  (`api/src/modules/importacion/importacion.routes.ts`), protegido con
+  `requirePermiso('movimientos.importar')`. El handler `plantilla`
+  (`importacion.controller.ts`) fija `Content-Type`
+  `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` y
+  `Content-Disposition: attachment; filename="plantilla-importacion-bancaria.xlsx"`.
+- **Generación** `generarPlantilla()` (`importacion.service.ts`) con **ExcelJS** (sin dependencias
+  nuevas): un workbook con una única hoja `Movimientos`; la fila 1 es el encabezado en **negrita**
+  (`Referencia` | `Monto en Bs` | `Fecha de ejecución`) y la fila 2 es **una única fila de ejemplo**
+  (`EJEMPLO-0000` | `0,01` | `01/01/2000`). El ejemplo es válido para el parser, de modo que la
+  plantilla sin modificar no produce errores de detección.
+- **Sin persistencia, sin migración.** El endpoint solo construye el archivo en memoria (mismo
+  patrón que las exportaciones de `reportes`: buffer en el servicio, cabeceras en el controlador).
+
+### 11.3 Frontend
+
+- `descargarPlantillaImportacion()` (`web/src/api/importacion.ts`) descarga el archivo con el helper
+  compartido `downloadFile()` (`web/src/api/client.ts`), que adjunta el `Bearer` y respeta el nombre
+  del `Content-Disposition`.
+- Botón **«Descargar plantilla»** en la tarjeta «Cargar archivo» de
+  `web/src/features/importacion/ImportacionPage.tsx`, junto con un aviso de que la **fila de ejemplo
+  debe reemplazarse o eliminarse** antes de importar, **porque los movimientos importados no se
+  pueden eliminar** desde la aplicación (el módulo `movimientos` solo expone lectura).
+
+### 11.4 Verificación
+
+- **Tests unitarios:** `npm test` en `api/` → **71 tests en verde** (sin cambios; el endpoint no
+  agrega casos unitarios).
+- **Contratos:** `docs/openapi.yaml` → **101** operaciones; `docs/postman_collection.json` → **101**
+  peticiones. Reconciliación: **101** = **100** definiciones
+  `router.{get,post,put,patch,delete}` en 20 archivos `*.routes.ts` + `GET /health` público.
+- **Round-trip en vivo** (API en `:4000`, `admin` / `Admin123!`):
+  `GET /api/importacion/plantilla` responde **200** con `Content-Type` xlsx y
+  `Content-Disposition: attachment; filename="plantilla-importacion-bancaria.xlsx"` (6628 bytes); el
+  archivo reenviado a
+  `POST /api/importacion/preview?cuentaRecaudadoraId=1&primeraFilaEsEncabezado=true` devuelve
+  `{"filasTotales":1,"erroresDeteccion":0,...}`. Un usuario sin el permiso (`consultor`) recibe
+  **403**; sin token, **401**.
+- **Contenido del workbook** (leído con ExcelJS desde el archivo descargado): hoja `Movimientos`,
+  fila 1 en negrita `["Referencia","Monto en Bs","Fecha de ejecución"]`, fila 2
+  `["EJEMPLO-0000","0,01","01/01/2000"]`, `rowCount = 2` (ninguna fila extra).
+
+### 11.5 Archivos de esta iteración
+
+- `api/src/modules/importacion/importacion.routes.ts` — `GET /plantilla` con
+  `requirePermiso('movimientos.importar')`.
+- `api/src/modules/importacion/importacion.controller.ts` — handler `plantilla` (cabeceras + buffer).
+- `api/src/modules/importacion/importacion.service.ts` — `generarPlantilla()` (ExcelJS).
+- `web/src/api/importacion.ts` — `descargarPlantillaImportacion()`.
+- `web/src/features/importacion/ImportacionPage.tsx` — botón «Descargar plantilla» + aviso.
+- `docs/openapi.yaml`, `docs/postman_collection.json`, los tres README, `CAMBIOS-SOLICITADOS.md` y
+  este CHANGELOG — sincronización documental.
