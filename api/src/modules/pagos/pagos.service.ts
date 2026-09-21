@@ -6,7 +6,7 @@ import { calcularTasa } from '../../lib/money';
 import { clasificarPorAntiguedad } from '../../lib/classification';
 import { getConfigValues } from '../../lib/config-values';
 import { evaluarVinculoConciliacion } from '../conciliacion/matcher';
-import { pagoCasWhere } from './optimistic-lock';
+import { pagoCasWhere, pagoModificadoError } from './optimistic-lock';
 import { guardarArchivo } from '../../lib/upload';
 import { crearParaUsuariosConPermiso } from '../notificaciones/notificaciones.service';
 import type { AuthUser } from '../../middleware/auth';
@@ -269,13 +269,6 @@ export async function obtenerPago(id: number, user: AuthUser) {
   return serializePago(pago as unknown as Record<string, unknown>);
 }
 
-/** 409 raised when a payment changed since it was read (optimistic lock miss). */
-function pagoModificadoError() {
-  return ApiError.conflict(
-    'El pago fue modificado por otro usuario. Recargue los datos e intente nuevamente.',
-  );
-}
-
 /**
  * Edits a reported payment.
  *
@@ -385,17 +378,12 @@ export async function editarPago(
       return {
         actualizado,
         pendingAudit: {
-          datosAntes: snapshot({
-            montoBs: pago.montoBs.toString(),
-            montoUsd: pago.montoUsd.toString(),
-            tasa: pago.tasa.toString(),
-            estado: pago.estado,
-          }),
-          datosDespues: snapshot({
-            montoBs: montoBs.toString(),
-            montoUsd: montoUsd.toString(),
-            tasa: tasa.toString(),
-          }),
+          // Full before/after snapshot, consistent with the validated branch:
+          // the audit trail must be complete for every field an edit can touch
+          // (referencia, cliente, concepto, observaciones, bancoOrigenId,
+          // tipoPagoId, tipoCobro, cuentaRecaudadoraId, fechaPago...).
+          datosAntes: snapshot(pago),
+          datosDespues: snapshot(actualizado),
         },
       };
     }

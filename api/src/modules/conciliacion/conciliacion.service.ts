@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma';
 import { ApiError } from '../../lib/http';
 import { auditar, snapshot } from '../../lib/audit';
 import { crearParaCobrador } from '../notificaciones/notificaciones.service';
+import { pagoCasReconciliacionWhere, pagoModificadoError } from '../pagos/optimistic-lock';
 import { buscarCoincidencias, buscarDuplicado } from './matcher';
 
 /**
@@ -51,56 +52,61 @@ export interface ValidarInput {
 export async function validarPago(input: ValidarInput) {
   const { pagoReportadoId, usuarioId } = input;
 
-  const pago = await prisma.pagoReportado.findUnique({
-    where: { id: pagoReportadoId },
-    include: { cobrador: { select: { id: true, nombre: true, codigo: true } } },
-  });
-  if (!pago) throw ApiError.notFound('Pago reportado no encontrado');
-  if (pago.estado !== 'pendiente') {
-    throw ApiError.conflict(`El pago ya fue procesado (estado "${pago.estado}")`);
-  }
-
-  let movimientoId = input.movimientoBancoId ?? null;
-  let tipo = input.tipo ?? TipoConciliacion.manual;
-
-  if (movimientoId == null) {
-    // Automatic suggestion path. CR-001 R3: closing automatically is unsafe when
-    // the payment matches a movement already reconciled with another payment, so
-    // the duplicate signal forces the validator to pick the movement manually.
-    const duplicado = await buscarDuplicado(pago);
-    if (duplicado) {
-      throw ApiError.conflict(
-        'El pago coincide con un movimiento bancario ya conciliado con otro pago. ' +
-          'No se puede validar automaticamente: seleccione manualmente el movimiento para validarlo.',
-      );
-    }
-
-    const coincidencias = await buscarCoincidencias(pago);
-    const mejor = coincidencias[0];
-    if (!mejor) {
-      throw ApiError.badRequest(
-        'No se encontro ningun movimiento bancario compatible para este pago',
-      );
-    }
-    movimientoId = mejor.movimiento.id;
-    tipo = TipoConciliacion.automatica;
-  }
-
-  const movimiento = await prisma.movimientoBanco.findUnique({
-    where: { id: movimientoId },
-    include: { pago: { select: { id: true } } },
-  });
-  if (!movimiento) throw ApiError.notFound('Movimiento bancario no encontrado');
-  if (movimiento.cuentaRecaudadoraId !== pago.cuentaRecaudadoraId) {
-    throw ApiError.badRequest('El movimiento no pertenece a la cuenta recaudadora del pago');
-  }
-  if (movimiento.estadoConciliacion === 'conciliado' || movimiento.pago) {
-    throw ApiError.conflict('El movimiento bancario ya esta conciliado con otro pago');
-  }
-
-  const diferenciaBs = pago.montoBs.minus(movimiento.montoBs);
-
   const resultado = await prisma.$transaction(async (tx) => {
+    // Re-read INSIDE the transaction and branch on the FRESH state: the payment
+    // must not change between this read and the reconciliation write, or
+    // `diferenciaBs` would be stored from amounts the payment no longer has and
+    // the 409 guard below would compare against a stale snapshot.
+    const pago = await tx.pagoReportado.findUnique({
+      where: { id: pagoReportadoId },
+      include: { cobrador: { select: { id: true, nombre: true, codigo: true } } },
+    });
+    if (!pago) throw ApiError.notFound('Pago reportado no encontrado');
+    if (pago.estado !== 'pendiente') {
+      throw ApiError.conflict(`El pago ya fue procesado (estado "${pago.estado}")`);
+    }
+
+    let movimientoId = input.movimientoBancoId ?? null;
+    let tipo = input.tipo ?? TipoConciliacion.manual;
+
+    if (movimientoId == null) {
+      // Automatic suggestion path. CR-001 R3: closing automatically is unsafe when
+      // the payment matches a movement already reconciled with another payment, so
+      // the duplicate signal forces the validator to pick the movement manually.
+      const duplicado = await buscarDuplicado(pago, undefined, tx);
+      if (duplicado) {
+        throw ApiError.conflict(
+          'El pago coincide con un movimiento bancario ya conciliado con otro pago. ' +
+            'No se puede validar automaticamente: seleccione manualmente el movimiento para validarlo.',
+        );
+      }
+
+      // Shares this transaction's snapshot instead of the global client.
+      const coincidencias = await buscarCoincidencias(pago, undefined, tx);
+      const mejor = coincidencias[0];
+      if (!mejor) {
+        throw ApiError.badRequest(
+          'No se encontro ningun movimiento bancario compatible para este pago',
+        );
+      }
+      movimientoId = mejor.movimiento.id;
+      tipo = TipoConciliacion.automatica;
+    }
+
+    const movimiento = await tx.movimientoBanco.findUnique({
+      where: { id: movimientoId },
+      include: { pago: { select: { id: true } } },
+    });
+    if (!movimiento) throw ApiError.notFound('Movimiento bancario no encontrado');
+    if (movimiento.cuentaRecaudadoraId !== pago.cuentaRecaudadoraId) {
+      throw ApiError.badRequest('El movimiento no pertenece a la cuenta recaudadora del pago');
+    }
+    if (movimiento.estadoConciliacion === 'conciliado' || movimiento.pago) {
+      throw ApiError.conflict('El movimiento bancario ya esta conciliado con otro pago');
+    }
+
+    const diferenciaBs = pago.montoBs.minus(movimiento.montoBs);
+
     const conciliacion = await tx.conciliacion.create({
       data: {
         pagoReportadoId: pago.id,
@@ -111,8 +117,11 @@ export async function validarPago(input: ValidarInput) {
       },
     });
 
-    const pagoActualizado = await tx.pagoReportado.update({
-      where: { id: pago.id },
+    // Compare-and-swap on the reconciliation-relevant fields only: a concurrent
+    // change to any of them yields 0 rows -> 409, while `soporteUrl` is excluded
+    // so `subirSoporte` cannot cause a false 409.
+    const { count } = await tx.pagoReportado.updateMany({
+      where: pagoCasReconciliacionWhere(pago),
       data: {
         estado: 'validado',
         movimientoBancoId: movimiento.id,
@@ -121,31 +130,36 @@ export async function validarPago(input: ValidarInput) {
         motivoRechazo: null,
       },
     });
+    if (count !== 1) throw pagoModificadoError();
+
+    const pagoActualizado = await tx.pagoReportado.findUniqueOrThrow({
+      where: { id: pago.id },
+    });
 
     await tx.movimientoBanco.update({
       where: { id: movimiento.id },
       data: { estadoConciliacion: 'conciliado' },
     });
 
-    return { conciliacion, pagoActualizado };
+    return { pago, conciliacion, pagoActualizado };
   });
 
   await auditar({
     usuarioId,
     entidad: 'pagos_reportados',
-    entidadId: pago.id,
+    entidadId: resultado.pago.id,
     accion: 'validar',
-    datosAntes: snapshot(pago),
+    datosAntes: snapshot(resultado.pago),
     datosDespues: snapshot(resultado.pagoActualizado),
     ip: input.ip,
   });
 
-  await crearParaCobrador(pago.cobradorId, {
+  await crearParaCobrador(resultado.pago.cobradorId, {
     tipo: 'pago_validado',
     titulo: 'Pago validado',
-    mensaje: `Su pago con referencia ${pago.referencia} por Bs ${pago.montoBs.toString()} fue validado.`,
+    mensaje: `Su pago con referencia ${resultado.pago.referencia} por Bs ${resultado.pago.montoBs.toString()} fue validado.`,
     entidad: 'pago',
-    entidadId: pago.id,
+    entidadId: resultado.pago.id,
   });
 
   return resultado.pagoActualizado;

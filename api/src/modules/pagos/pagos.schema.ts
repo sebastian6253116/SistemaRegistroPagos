@@ -1,18 +1,6 @@
 import { z } from 'zod';
 import { TipoCobro } from '@prisma/client';
-
-// Monetary amount shared by every payment amount field (montoBs / montoUsd).
-// Accepts a string or a number but MUST resolve to a finite, strictly positive
-// decimal. Validating here returns a 400; without it, a non-numeric/zero/negative
-// value reached `calcularTasa()` (a pure lib that throws a plain Error) and
-// surfaced as an opaque 500.
-const decimalString = z
-  .union([z.string(), z.number()])
-  .transform((v) => String(v).trim())
-  .refine(
-    (v) => /^\d+(\.\d+)?$/.test(v) && Number.isFinite(Number(v)) && Number(v) > 0,
-    'El monto debe ser un numero positivo',
-  );
+import { montoPositivo } from '../../lib/schemas';
 
 export const reportarPagoSchema = z.object({
   fechaPago: z.coerce.date({ errorMap: () => ({ message: 'Fecha de pago invalida' }) }),
@@ -21,8 +9,8 @@ export const reportarPagoSchema = z.object({
   referencia: z.string().min(1, 'La referencia es obligatoria').max(60),
   bancoOrigenId: z.coerce.number().int().positive('Banco de origen invalido').optional().nullable(),
   cuentaRecaudadoraId: z.coerce.number().int().positive('Cuenta recaudadora invalida'),
-  montoBs: decimalString,
-  montoUsd: decimalString,
+  montoBs: montoPositivo,
+  montoUsd: montoPositivo,
   cliente: z.string().max(180).optional(),
   concepto: z.string().max(255).optional(),
   tipoCobro: z.nativeEnum(TipoCobro),
@@ -54,8 +42,8 @@ export const editarPagoSchema = z.object({
   referencia: z.string().min(1).max(60).optional(),
   bancoOrigenId: z.coerce.number().int().positive().optional().nullable(),
   cuentaRecaudadoraId: z.coerce.number().int().positive().optional(),
-  montoBs: decimalString.optional(),
-  montoUsd: decimalString.optional(),
+  montoBs: montoPositivo.optional(),
+  montoUsd: montoPositivo.optional(),
   fechaPago: z.coerce.date().optional(),
   cliente: z.string().max(180).optional(),
   concepto: z.string().max(255).optional(),

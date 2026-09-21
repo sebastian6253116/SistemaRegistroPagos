@@ -165,10 +165,14 @@ export function evaluarVinculoConciliacion(
  * returns the scored candidates ordered by score (desc). The candidate set is
  * narrowed in SQL (account + state + amount window + date window + reference
  * OR clause) so only a small set is scored in memory.
+ *
+ * `db` defaults to the global client so existing callers are unaffected; pass a
+ * transaction client to keep the scan inside the caller's snapshot.
  */
 export async function buscarCoincidencias(
   pago: PagoParaConciliar,
   configOverride?: ConfigValues,
+  db: Prisma.TransactionClient = prisma,
 ): Promise<Coincidencia[]> {
   const config = configOverride ?? (await getConfigValues());
   const tolerancia = new Prisma.Decimal(config.toleranciaMontoBs);
@@ -185,7 +189,7 @@ export async function buscarCoincidencias(
     referenciaOr.push({ referencia: { endsWith: sufijo } });
   }
 
-  const movimientos = await prisma.movimientoBanco.findMany({
+  const movimientos = await db.movimientoBanco.findMany({
     where: {
       cuentaRecaudadoraId: pago.cuentaRecaudadoraId,
       estadoConciliacion: 'no_conciliado',

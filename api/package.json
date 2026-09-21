@@ -13,8 +13,11 @@
     "migrate:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
     "seed:demo": "tsx prisma/seed-demo.ts",
+    "create-admin": "tsx prisma/create-admin.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:integration:prepare": "tsx tests/integration/prepare-db.ts",
+    "test:integration": "tsx tests/integration/run.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -1,4 +1,12 @@
 import type { EstadoPago, Prisma, TipoCobro } from '@prisma/client';
+import { ApiError } from '../../lib/http';
+
+/** 409 raised when a compare-and-swap update affected 0 rows. */
+export function pagoModificadoError() {
+  return ApiError.conflict(
+    'El pago fue modificado por otro usuario. Recargue los datos e intente nuevamente.',
+  );
+}
 
 /**
  * Snapshot of the fields that must not change between the read and the write of
@@ -52,5 +60,31 @@ export function pagoCasWhere(snapshot: PagoLockSnapshot): Prisma.PagoReportadoWh
     tipoCobro: snapshot.tipoCobro,
     observaciones: snapshot.observaciones,
     updatedAt: snapshot.updatedAt,
+  };
+}
+
+/**
+ * Reconciliation CAS snapshot: `validarPago` locks on these fields only, so an
+ * unrelated concurrent write (e.g. `subirSoporte`, which only touches
+ * `soporteUrl`) cannot cause a false 409. `editarPago` keeps the full snapshot
+ * because for edit-vs-edit ANY field change is a real conflict.
+ */
+export type PagoReconciliacionSnapshot = Pick<
+  PagoLockSnapshot,
+  'id' | 'estado' | 'movimientoBancoId' | 'montoBs' | 'referencia' | 'fechaPago' | 'cuentaRecaudadoraId'
+>;
+
+/** Compare-and-swap `where` for the reconciliation decision (see the type above). */
+export function pagoCasReconciliacionWhere(
+  snapshot: PagoReconciliacionSnapshot,
+): Prisma.PagoReportadoWhereInput {
+  return {
+    id: snapshot.id,
+    estado: snapshot.estado,
+    movimientoBancoId: snapshot.movimientoBancoId,
+    montoBs: snapshot.montoBs,
+    referencia: snapshot.referencia,
+    fechaPago: snapshot.fechaPago,
+    cuentaRecaudadoraId: snapshot.cuentaRecaudadoraId,
   };
 }

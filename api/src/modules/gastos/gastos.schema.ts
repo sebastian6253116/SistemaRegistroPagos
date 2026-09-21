@@ -1,16 +1,5 @@
 import { z } from 'zod';
-
-/**
- * Monetary input. Accepts string or number to preserve DECIMAL(18,2) precision
- * (never parsed as a float) and validates up to 2 decimals.
- */
-const monto = z
-  .union([z.string(), z.number()])
-  .transform((v) => (typeof v === 'number' ? v.toFixed(2) : v.trim()))
-  .refine(
-    (v) => /^\d+(\.\d{1,2})?$/.test(v),
-    'Monto invalido: use un numero positivo con hasta 2 decimales',
-  );
+import { montoPositivo } from '../../lib/schemas';
 
 const fecha = z
   .string()
@@ -39,8 +28,8 @@ export const listarGastosQuerySchema = z.object({
 
 export const crearGastoSchema = z.object({
   fecha,
-  montoBs: monto,
-  montoUsd: monto,
+  montoBs: montoPositivo,
+  montoUsd: montoPositivo,
   movimientoBancoId: z.coerce.number().int().positive().optional(),
   referencia: z.string().max(60).optional(),
   descripcion: z.string().min(1, 'La descripcion es obligatoria').max(500),

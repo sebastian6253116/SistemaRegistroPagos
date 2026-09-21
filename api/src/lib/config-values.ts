@@ -90,9 +90,21 @@ export async function getConfigValues(force = false): Promise<ConfigValues> {
     return cache.values;
   }
 
-  const rows = await prisma.parametro.findMany({
-    where: { clave: { in: Object.values(PARAM_MAP) } },
-  });
+  // The documented contract is to fall back to env defaults, so a failed read
+  // must NOT propagate: an unguarded `findMany` turned a transient DB error into
+  // an opaque 500 for every caller. Log and treat it as "no override present".
+  let rows: Awaited<ReturnType<typeof prisma.parametro.findMany>> = [];
+  let leidoOk = true;
+  try {
+    rows = await prisma.parametro.findMany({
+      where: { clave: { in: Object.values(PARAM_MAP) } },
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to read parametros; falling back to env defaults:', err);
+    rows = [];
+    leidoOk = false;
+  }
   const byClave = new Map(rows.map((r) => [r.clave, r.valor]));
 
   const values = { ...DEFAULTS };
@@ -114,7 +126,9 @@ export async function getConfigValues(force = false): Promise<ConfigValues> {
     DEFAULTS.bancoOrigenObligatorio,
   );
 
-  cache = { values, expiresAt: Date.now() + CACHE_TTL_MS };
+  // A failed read is NOT cached: caching the defaults for 30s would hide the
+  // transient failure and delay recovery. The next call retries the read.
+  if (leidoOk) cache = { values, expiresAt: Date.now() + CACHE_TTL_MS };
   return values;
 }
 
