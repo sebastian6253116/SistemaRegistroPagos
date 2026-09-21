@@ -1,0 +1,30 @@
+# Dependencies (reinstalled inside the image)
+node_modules
+
+# Build output (rebuilt inside the image)
+dist
+
+# Secrets - never copy into an image layer
+.env
+.env.*
+
+# Uploaded user files (mounted as a volume at runtime)
+uploads
+
+# Logs
+*.log
+
+# Tests and local artifacts (not needed to build or run)
+tests
+coverage
+smoke-pago-id.txt
+_tmp_*
+*.bak
+
+# Docker / VCS / docs
+Dockerfile
+.dockerignore
+.git
+.gitignore
+README.md
+CONVENTIONS.md
