@@ -20,6 +20,32 @@ export function clasificarPorAntiguedad(
 }
 
 /**
+ * "Old document vs. bank movement" alert.
+ *
+ * A collector can report a payment TODAY whose `fechaPago` is OLD, and the bank
+ * movement it gets reconciled against has a CURRENT `fechaEjecucion`: the
+ * document travelled a long time before the money actually moved. This is a
+ * DIFFERENT signal from `clasificarPorAntiguedad` (which compares the payment
+ * against an optional document date), so it is derived from the movement date.
+ *
+ * Returns the whole-day gap (complete 24h periods, same strict "greater than"
+ * rule as `clasificarPorAntiguedad`) when the movement's execution date is MORE
+ * THAN `umbralDias` days AFTER the payment date, or `null` when the payment is
+ * not flagged (no movement date, movement on/before the payment, or the gap is
+ * within the threshold — exactly the threshold is NOT flagged).
+ */
+export function alertaAntiguedadDocumento(
+  fechaPago: Date | null | undefined,
+  fechaEjecucionMovimiento: Date | null | undefined,
+  umbralDias: number,
+): number | null {
+  if (!fechaPago || !fechaEjecucionMovimiento) return null;
+  const diffMs = fechaEjecucionMovimiento.getTime() - fechaPago.getTime();
+  const diffDias = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  return diffDias > umbralDias ? diffDias : null;
+}
+
+/**
  * Compares the collector's mark with the derived classification.
  * Never overwrites the collector's value; only flags the mismatch.
  */

@@ -3,7 +3,7 @@ import { prisma } from '../../lib/prisma';
 import { ApiError, paginate, parsePagination } from '../../lib/http';
 import { auditar, snapshot } from '../../lib/audit';
 import { calcularTasa } from '../../lib/money';
-import { clasificarPorAntiguedad } from '../../lib/classification';
+import { alertaAntiguedadDocumento, clasificarPorAntiguedad } from '../../lib/classification';
 import { getConfigValues } from '../../lib/config-values';
 import { evaluarVinculoConciliacion } from '../conciliacion/matcher';
 import { pagoCasWhere, pagoModificadoError } from './optimistic-lock';
@@ -52,8 +52,17 @@ const PAGO_SELECT = {
   validador: { select: { id: true, nombreCompleto: true } },
 } satisfies Prisma.PagoReportadoSelect;
 
-/** Serializes Decimal fields as strings so JSON never loses precision. */
-function serializePago<T extends Record<string, unknown>>(pago: T) {
+/**
+ * Serializes Decimal fields as strings so JSON never loses precision.
+ *
+ * The threshold is passed in (never read here) so callers resolve the config
+ * ONCE per request instead of once per row, while this stays synchronous/pure.
+ */
+function serializePago<T extends Record<string, unknown>>(
+  pago: T,
+  umbralAntiguedadDias: number,
+  puedeVerAlertaAntiguedad: boolean,
+) {
   const out: Record<string, unknown> = { ...pago };
   for (const key of ['montoBs', 'montoUsd', 'tasa'] as const) {
     const v = out[key];
@@ -71,7 +80,24 @@ function serializePago<T extends Record<string, unknown>>(pago: T) {
   if (mov && mov.montoBs != null) {
     mov.montoBs = (mov.montoBs as { toString: () => string }).toString();
   }
+  // "Old document" alert: the payment is old relative to the bank movement that
+  // finally moved the money. Additive field, ALWAYS present so the response shape
+  // stays stable; `null` when the caller lacks `pagos.ver_alerta_antiguedad`
+  // (server-side boundary), when there is no linked movement or when the gap is
+  // within the configured threshold.
+  out.alertaAntiguedadDias = puedeVerAlertaAntiguedad
+    ? alertaAntiguedadDocumento(
+        out.fechaPago as Date | null,
+        (mov?.fechaEjecucion as Date | null | undefined) ?? null,
+        umbralAntiguedadDias,
+      )
+    : null;
   return out;
+}
+
+/** Server-side gate for the "old document" alert (never trust the UI). */
+function puedeVerAlertaAntiguedad(user: AuthUser): boolean {
+  return user.permisos.includes('pagos.ver_alerta_antiguedad');
 }
 
 /**
@@ -211,7 +237,11 @@ export async function reportarPago(input: ReportarPagoInput, user: AuthUser) {
     user.id,
   );
 
-  return serializePago(creado as unknown as Record<string, unknown>);
+  return serializePago(
+    creado as unknown as Record<string, unknown>,
+    config.umbralAntiguedadDias,
+    puedeVerAlertaAntiguedad(user),
+  );
 }
 
 function buildWhere(query: ListarPagosQuery): Prisma.PagoReportadoWhereInput {
@@ -248,7 +278,7 @@ export async function listarPagos(query: ListarPagosQuery, user: AuthUser) {
   const params = parsePagination(query as unknown as Record<string, unknown>);
   const where = whereConAislamiento(buildWhere(query), user);
 
-  const [rows, total] = await Promise.all([
+  const [rows, total, config] = await Promise.all([
     prisma.pagoReportado.findMany({
       where,
       select: PAGO_SELECT,
@@ -257,16 +287,34 @@ export async function listarPagos(query: ListarPagosQuery, user: AuthUser) {
       take: params.take,
     }),
     prisma.pagoReportado.count({ where }),
+    getConfigValues(),
   ]);
 
-  return paginate(rows.map((r) => serializePago(r as unknown as Record<string, unknown>)), total, params);
+  return paginate(
+    rows.map((r) =>
+      serializePago(
+        r as unknown as Record<string, unknown>,
+        config.umbralAntiguedadDias,
+        puedeVerAlertaAntiguedad(user),
+      ),
+    ),
+    total,
+    params,
+  );
 }
 
 export async function obtenerPago(id: number, user: AuthUser) {
   const where = whereConAislamiento({ id }, user);
-  const pago = await prisma.pagoReportado.findFirst({ where, select: PAGO_SELECT });
+  const [pago, config] = await Promise.all([
+    prisma.pagoReportado.findFirst({ where, select: PAGO_SELECT }),
+    getConfigValues(),
+  ]);
   if (!pago) throw ApiError.notFound('Pago reportado no encontrado');
-  return serializePago(pago as unknown as Record<string, unknown>);
+  return serializePago(
+    pago as unknown as Record<string, unknown>,
+    config.umbralAntiguedadDias,
+    puedeVerAlertaAntiguedad(user),
+  );
 }
 
 /**
@@ -293,6 +341,9 @@ export async function editarPago(
   ip?: string | null,
 ) {
   const where = whereConAislamiento({ id }, user);
+  // Resolved ONCE per request: reused for the reconciliation re-evaluation and
+  // for the serialized "old document" threshold below.
+  const config = await getConfigValues();
 
   const resultado = await prisma.$transaction(async (tx) => {
     // Re-read INSIDE the transaction and branch on the FRESH state. Branching on
@@ -318,7 +369,6 @@ export async function editarPago(
     }
 
     await validarTipoPago(input.tipoPagoId, tx);
-    const config = await getConfigValues();
 
     // Partial-update semantics: an ABSENT bancoOrigenId leaves the stored bank
     // unchanged, while an explicit `null` clears it. The required/optional rule
@@ -508,7 +558,11 @@ export async function editarPago(
     });
   }
 
-  return serializePago(resultado.actualizado as unknown as Record<string, unknown>);
+  return serializePago(
+    resultado.actualizado as unknown as Record<string, unknown>,
+    config.umbralAntiguedadDias,
+    puedeVerAlertaAntiguedad(user),
+  );
 }
 
 /**
@@ -518,7 +572,10 @@ export async function editarPago(
  */
 export async function subirSoporte(id: number, file: Express.Multer.File, user: AuthUser) {
   const where = whereConAislamiento({ id }, user);
-  const pago = await prisma.pagoReportado.findFirst({ where, select: PAGO_SELECT });
+  const [pago, config] = await Promise.all([
+    prisma.pagoReportado.findFirst({ where, select: PAGO_SELECT }),
+    getConfigValues(),
+  ]);
   if (!pago) throw ApiError.notFound('Pago reportado no encontrado');
   if (pago.estado !== 'pendiente') {
     throw ApiError.conflict(
@@ -542,7 +599,11 @@ export async function subirSoporte(id: number, file: Express.Multer.File, user: 
     datosDespues: snapshot({ soporteUrl }),
   });
 
-  return serializePago(actualizado as unknown as Record<string, unknown>);
+  return serializePago(
+    actualizado as unknown as Record<string, unknown>,
+    config.umbralAntiguedadDias,
+    puedeVerAlertaAntiguedad(user),
+  );
 }
 
 /**
@@ -588,7 +649,10 @@ export async function eliminarPago(id: number, user: AuthUser): Promise<void> {
  */
 export async function revertirPago(id: number, input: RevertirPagoInput, user: AuthUser) {
   const where = whereConAislamiento({ id }, user);
-  const pago = await prisma.pagoReportado.findFirst({ where });
+  const [pago, config] = await Promise.all([
+    prisma.pagoReportado.findFirst({ where }),
+    getConfigValues(),
+  ]);
   if (!pago) throw ApiError.notFound('Pago reportado no encontrado');
   if (pago.estado !== 'validado') {
     throw ApiError.conflict(
@@ -638,5 +702,9 @@ export async function revertirPago(id: number, input: RevertirPagoInput, user: A
     return revertido;
   });
 
-  return serializePago(actualizado as unknown as Record<string, unknown>);
+  return serializePago(
+    actualizado as unknown as Record<string, unknown>,
+    config.umbralAntiguedadDias,
+    puedeVerAlertaAntiguedad(user),
+  );
 }

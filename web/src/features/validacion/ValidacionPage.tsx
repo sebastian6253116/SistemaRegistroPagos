@@ -39,7 +39,7 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ClearFiltersButton } from '@/components/common/ClearFiltersButton';
 import { FilePreviewDialog } from '@/components/common/FilePreviewDialog';
-import { EstadoBadge, TipoCobroBadge } from '@/features/pagos/pago-utils';
+import { AlertaAntiguedadBadge, EstadoBadge, TipoCobroBadge } from '@/features/pagos/pago-utils';
 import { EditarPagoDialog } from '@/features/pagos/EditarPagoDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -106,6 +106,7 @@ export default function ValidacionPage() {
   const puedeEliminar = tiene('pagos.eliminar');
   const puedeRevertir = tiene('pagos.revertir_validacion');
   const puedeEditar = tiene('pagos.editar');
+  const puedeVerAlerta = tiene('pagos.ver_alerta_antiguedad');
   const puedeEditarPago = (pago: PagoReportado) =>
     puedeEditar && (pago.estado === 'pendiente' || pago.estado === 'validado');
 
@@ -476,6 +477,12 @@ export default function ValidacionPage() {
         cell: ({ row }) => <TipoCobroBadge tipo={row.original.tipoCobroDerivado ?? row.original.tipoCobro} />,
       },
       {
+        id: 'alerta-antiguedad',
+        header: 'Antigüedad',
+        cell: ({ row }) =>
+          puedeVerAlerta ? <AlertaAntiguedadBadge dias={row.original.alertaAntiguedadDias} /> : null,
+      },
+      {
         id: 'revisar',
         header: 'Revisar',
         cell: ({ row }) =>
@@ -494,7 +501,7 @@ export default function ValidacionPage() {
           ) : null,
       },
     ],
-    [],
+    [puedeVerAlerta],
   );
 
   return (
@@ -658,6 +665,7 @@ export default function ValidacionPage() {
                     </div>
                   </dl>
                   {row.revisarClasificacion && <Badge variant="warning">Revisar clasificación</Badge>}
+                  {puedeVerAlerta && <AlertaAntiguedadBadge dias={row.alertaAntiguedadDias} />}
                   <p className="text-[11px] text-muted-foreground">
                     Toque la tarjeta para ver las coincidencias bancarias.
                   </p>

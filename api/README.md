@@ -176,10 +176,14 @@ petición directa a `GET /uploads/...` responde **404** (se eliminó el `express
   revertirse la validación).
 - El permiso **`pagos.editar`** se siembra en `api/prisma/seed.ts` y se concede al rol
   **Administrador** vía `ALL` y al rol **Administrativo** (que además recibe
-  `pagos.revertir_validacion`). Con él el seed define **40 permisos** en total y estos conteos por
-  rol, verificados en la base: Administrador **40**, Administrativo **19**, Consultor **10**,
+  `pagos.revertir_validacion`). Con él el seed define **41 permisos** en total y estos conteos por
+  rol, verificados en la base: Administrador **41**, Administrativo **20**, Consultor **10**,
   Cobrador **3**. El rol **Consultor** conserva `pagos.ver_todos`, pero es **estrictamente de solo
   lectura**: `pagos.ver_todos` no habilita ninguna ruta de escritura.
+- La alerta de **documento viejo** (`alertaAntiguedadDias`, en `serializePago`/`serializarPago`) es
+  un límite **de servidor**: exige `pagos.ver_alerta_antiguedad` (sembrado en Administrador vía
+  `ALL` y en Administrativo). Sin ese permiso el campo viaja siempre en `null` —nunca se resuelve
+  solo en el frontend— y el shape de la respuesta no cambia.
 
 ### Validación de montos en pagos
 

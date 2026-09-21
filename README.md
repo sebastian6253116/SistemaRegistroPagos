@@ -185,8 +185,8 @@ Creados por `npm run seed`. **Cambie estas credenciales antes de usar el sistema
 Modelo **granular**: tabla `permisos` + `rol_permisos`, verificado en middleware del backend
 **y** usado para ocultar UI en el frontend (`usePermiso`, `<RequierePermiso>`, `ProtectedRoute`).
 
-Claves principales (el seed define **40** en total): `pagos.reportar`, `pagos.ver_propios`,
-`pagos.ver_todos`, `pagos.validar`, `pagos.rechazar`, `pagos.marcar_duplicado`,
+Claves principales (el seed define **41** en total): `pagos.reportar`, `pagos.ver_propios`,
+`pagos.ver_todos`, `pagos.validar`, `pagos.ver_alerta_antiguedad`, `pagos.rechazar`, `pagos.marcar_duplicado`,
 `pagos.validar_lote`, `pagos.eliminar`, `pagos.revertir_validacion`, `pagos.editar`,
 `movimientos.ver`,
 `movimientos.importar`, `gastos.*`, `tipos_pago.ver`, `tipos_pago.gestionar`, `tasas.ver`,
@@ -195,8 +195,11 @@ Claves principales (el seed define **40** en total): `pagos.reportar`, `pagos.ve
 `cuentas.ver`, `cuentas.gestionar`, `dashboard.ver`, `reportes.ver`, `reportes.exportar`,
 `usuarios.*`, `usuarios.eliminar_definitivo`, `roles.*`, `config.ver`, `config.editar`, `auditoria.ver`.
 
-**Conteo de permisos por rol (verificado en la base):** Administrador **40** (todos),
-Administrativo **19**, Consultor **10** y Cobrador **3**; el catálogo total sigue en **40** claves.
+**Conteo de permisos por rol (verificado en la base):** Administrador **41** (todos),
+Administrativo **20**, Consultor **10** y Cobrador **3**; el catálogo total sigue en **41** claves.
+
+La alerta de **documento viejo** (`alertaAntiguedadDias`) exige `pagos.ver_alerta_antiguedad`; sin él
+la API devuelve el campo en `null` (nunca lo filtra el frontend solo).
 
 **`pagos.ver_todos` es un permiso de SOLO LECTURA.** Permite ver los pagos de todos los
 cobradores (listado y detalle), pero **no** concede escritura: las rutas de escritura sobre pagos
@@ -255,6 +258,10 @@ tasa = monto_bs / monto_usd      # 3.600,00 Bs / 20,00 USD = 180,000000
 - El cobrador marca `tipo_cobro`; el sistema **deriva** una clasificación por antigüedad
   (umbral configurable, 30 días por defecto) cuando se informa la fecha del documento.
 - Si difieren, se marca `revisar_clasificacion = true` **sin sobrescribir** lo que puso el cobrador.
+- El mismo umbral (`cobro.umbral_antiguedad_dias`) alimenta la **alerta de "documento viejo"**
+  contra el movimiento bancario: si la fecha de ejecución del movimiento conciliado es posterior a
+  la fecha del pago por más de ese umbral, el pago expone `alertaAntiguedadDias` y se resalta en la
+  sección de pagos y en el reporte de cobros.
 
 ### 8.4 Importación del Excel del banco
 

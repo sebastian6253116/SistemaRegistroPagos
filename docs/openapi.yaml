@@ -3624,7 +3624,12 @@ paths:
       tags: [Reportes]
       operationId: reporteCobros
       summary: Reporte de cobros
-      description: 'Requiere permiso: reportes.ver.'
+      description: >-
+        Requiere permiso: reportes.ver. Cada fila incluye `alertaAntiguedadDias`
+        (alerta de "documento viejo" contra el movimiento bancario conciliado),
+        resuelta con el parametro `cobro.umbral_antiguedad_dias`. El valor solo se
+        calcula si el usuario tiene el permiso `pagos.ver_alerta_antiguedad`; sin
+        el, el campo viaja como `null` (limite de servidor, no solo de UI).
       parameters:
         - $ref: '#/components/parameters/PageQuery'
         - $ref: '#/components/parameters/PageSizeQuery'
@@ -4546,6 +4551,17 @@ components:
             referencia: { type: string, example: '12345678' }
             montoBs: { type: string, example: '3600.00' }
             fechaEjecucion: { type: string, format: date-time, example: '2026-09-19T00:00:00.000Z' }
+        alertaAntiguedadDias:
+          type: integer
+          nullable: true
+          description: >-
+            Alerta de "documento viejo". Dias enteros (periodos completos de 24h)
+            cuando la fecha de ejecucion del movimiento bancario conciliado es
+            POSTERIOR a la fecha del pago por mas de `cobro.umbral_antiguedad_dias`;
+            `null` cuando no hay movimiento vinculado o el desfase esta dentro del
+            umbral (exactamente el umbral NO se marca). Requiere el permiso
+            `pagos.ver_alerta_antiguedad`: sin el, el campo siempre es `null`.
+          example: 45
         validador:
           type: object
           nullable: true

@@ -145,6 +145,10 @@ export interface PagoReportado {
     montoBs: string;
     fechaEjecucion: string;
   } | null;
+  // Alerta de "documento viejo": días de desfase entre la fecha del pago y la
+  // fecha de ejecución del movimiento bancario conciliado, cuando supera el
+  // umbral configurado (`cobro.umbral_antiguedad_dias`). `null` si no aplica.
+  alertaAntiguedadDias: number | null;
   validador: { id: number; nombreCompleto: string } | null;
 }
 

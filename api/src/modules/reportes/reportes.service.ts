@@ -3,6 +3,8 @@ import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { paginate, type PaginationParams } from '../../lib/http';
 import { desviacionPorcentual, tasaPromedioPonderada } from '../../lib/money';
+import { alertaAntiguedadDocumento } from '../../lib/classification';
+import { getConfigValues } from '../../lib/config-values';
 import { prisma } from '../../lib/prisma';
 import * as gastosService from '../gastos/gastos.service';
 import type { EstadoPagoFiltro, TipoReporte } from './reportes.schema';
@@ -134,11 +136,17 @@ const pagoSelect = {
       banco: { select: { id: true, nombre: true, codigo: true } },
     },
   },
+  // Movement execution date drives the "old document" alert (additive field).
+  movimientoBanco: { select: { fechaEjecucion: true } },
 } satisfies Prisma.PagoReportadoSelect;
 
 type PagoDetalle = Prisma.PagoReportadoGetPayload<{ select: typeof pagoSelect }>;
 
-function serializarPago(row: PagoDetalle) {
+function serializarPago(
+  row: PagoDetalle,
+  umbralAntiguedadDias: number,
+  puedeVerAlertaAntiguedad: boolean,
+) {
   return {
     id: row.id,
     fechaPago: row.fechaPago,
@@ -153,6 +161,15 @@ function serializarPago(row: PagoDetalle) {
     tasa: row.tasa.toString(),
     cobrador: row.cobrador,
     cuentaRecaudadora: row.cuentaRecaudadora,
+    // Always present so the response shape stays stable; `null` when the caller
+    // lacks `pagos.ver_alerta_antiguedad` (server-side boundary).
+    alertaAntiguedadDias: puedeVerAlertaAntiguedad
+      ? alertaAntiguedadDocumento(
+          row.fechaPago,
+          row.movimientoBanco?.fechaEjecucion ?? null,
+          umbralAntiguedadDias,
+        )
+      : null,
   };
 }
 
@@ -160,9 +177,13 @@ function serializarPago(row: PagoDetalle) {
 // 1. Cobros por periodo (detalle + consolidado)
 // ---------------------------------------------------------------------------
 
-export async function cobros(f: ReportFilters, params: PaginationParams) {
+export async function cobros(
+  f: ReportFilters,
+  params: PaginationParams,
+  puedeVerAlertaAntiguedad = false,
+) {
   const where = wherePagosPrisma(f);
-  const [rows, total, agg] = await Promise.all([
+  const [rows, total, agg, config] = await Promise.all([
     prisma.pagoReportado.findMany({
       where,
       select: pagoSelect,
@@ -176,10 +197,15 @@ export async function cobros(f: ReportFilters, params: PaginationParams) {
       _sum: { montoUsd: true, montoBs: true },
       _count: { _all: true },
     }),
+    getConfigValues(),
   ]);
 
   return {
-    ...paginate(rows.map(serializarPago), total, params),
+    ...paginate(
+      rows.map((r) => serializarPago(r, config.umbralAntiguedadDias, puedeVerAlertaAntiguedad)),
+      total,
+      params,
+    ),
     consolidado: {
       totalUsd: (agg._sum.montoUsd ?? new Prisma.Decimal(0)).toString(),
       totalBs: (agg._sum.montoBs ?? new Prisma.Decimal(0)).toString(),
@@ -595,13 +621,17 @@ export async function movimientosNoConciliados(f: ReportFilters, params: Paginat
 // 7. Pagos reportados sin respaldo bancario
 // ---------------------------------------------------------------------------
 
-export async function pagosSinRespaldo(f: ReportFilters, params: PaginationParams) {
+export async function pagosSinRespaldo(
+  f: ReportFilters,
+  params: PaginationParams,
+  puedeVerAlertaAntiguedad = false,
+) {
   const where: Prisma.PagoReportadoWhereInput = {
     ...wherePagosPrisma(f),
     movimientoBancoId: null,
   };
 
-  const [rows, total] = await Promise.all([
+  const [rows, total, config] = await Promise.all([
     prisma.pagoReportado.findMany({
       where,
       select: pagoSelect,
@@ -610,9 +640,14 @@ export async function pagosSinRespaldo(f: ReportFilters, params: PaginationParam
       take: params.take,
     }),
     prisma.pagoReportado.count({ where }),
+    getConfigValues(),
   ]);
 
-  return paginate(rows.map(serializarPago), total, params);
+  return paginate(
+    rows.map((r) => serializarPago(r, config.umbralAntiguedadDias, puedeVerAlertaAntiguedad)),
+    total,
+    params,
+  );
 }
 
 // ---------------------------------------------------------------------------

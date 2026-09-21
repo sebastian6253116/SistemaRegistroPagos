@@ -11,7 +11,7 @@ import { usePermiso } from '@/hooks/usePermiso';
 import { formatAntiguedad, formatDate, formatMoney, formatNumber, formatPercent, formatRate } from '@/lib/format';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable } from '@/components/common/DataTable';
-import { EstadoBadge } from '@/features/pagos/pago-utils';
+import { AlertaAntiguedadBadge, EstadoBadge } from '@/features/pagos/pago-utils';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ClearFiltersButton } from '@/components/common/ClearFiltersButton';
 import { Card, CardContent } from '@/components/ui/card';
@@ -128,6 +128,8 @@ function TablaWrapper({
 }
 
 function CobrosTab({ filtros, onPageChange }: ReportTabProps) {
+  const { tiene } = usePermiso();
+  const puedeVerAlerta = tiene('pagos.ver_alerta_antiguedad');
   const q = useQuery({
     queryKey: queryKeys.reporte('cobros', filtros),
     queryFn: () => reportesApi.cobros(filtros),
@@ -142,9 +144,10 @@ function CobrosTab({ filtros, onPageChange }: ReportTabProps) {
       { accessorKey: 'montoBs', header: 'Monto Bs', cell: ({ row }) => formatMoney(row.original.montoBs) },
       { accessorKey: 'montoUsd', header: 'Monto USD', cell: ({ row }) => formatMoney(row.original.montoUsd) },
       { accessorKey: 'tasa', header: 'Tasa', cell: ({ row }) => formatRate(row.original.tasa) },
+      { id: 'alerta-antiguedad', header: 'Antigüedad', cell: ({ row }) => (puedeVerAlerta ? <AlertaAntiguedadBadge dias={row.original.alertaAntiguedadDias} /> : null) },
       { accessorKey: 'estado', header: 'Estado' },
     ],
-    [],
+    [puedeVerAlerta],
   );
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   return (
@@ -194,6 +197,7 @@ function CobrosTab({ filtros, onPageChange }: ReportTabProps) {
                 <dd className="tabular-nums text-muted-foreground">{formatRate(row.tasa)}</dd>
               </div>
             </dl>
+            {puedeVerAlerta && <AlertaAntiguedadBadge dias={row.alertaAntiguedadDias} />}
           </div>
         )}
         emptyTitle="Sin cobros en el período"
