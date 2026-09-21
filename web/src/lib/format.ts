@@ -54,12 +54,18 @@ export function formatPercent(
   return `${toNumber(value).toFixed(decimals)} %`;
 }
 
-/** Parsea "YYYY-MM-DD" o ISO como fecha de calendario sin corrimiento de zona. */
+/**
+ * Parsea "YYYY-MM-DD" o ISO como fecha de calendario sin corrimiento de zona.
+ * Una columna DATE se serializa como medianoche UTC: se toma su parte de fecha
+ * y se arma una fecha LOCAL de ese mismo día, así el día nunca se corre. Una
+ * instancia de Date pasa sin cambios.
+ */
 export function parseCalendarDate(value: string | Date | null | undefined): Date | null {
   if (!value) return null;
   if (value instanceof Date) return value;
-  const iso = value.length === 10 ? `${value}T00:00:00` : value;
-  const d = new Date(iso);
+  const datePart = /^(\d{4}-\d{2}-\d{2})/.exec(value)?.[1];
+  if (!datePart) return null;
+  const d = new Date(`${datePart}T00:00:00`);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 

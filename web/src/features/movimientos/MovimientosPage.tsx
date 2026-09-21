@@ -7,7 +7,7 @@ import { obtenerLote } from '@/api/importacion';
 import { listarCuentas } from '@/api/cuentas';
 import { queryKeys, STALE_CATALOGS, STALE_LISTS } from '@/lib/queryClient';
 import { useDebounce } from '@/hooks/useDebounce';
-import { formatBs, formatDate } from '@/lib/format';
+import { formatBs, formatDate, formatDateTime } from '@/lib/format';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable } from '@/components/common/DataTable';
 import { ErrorState } from '@/components/common/ErrorState';
@@ -47,8 +47,8 @@ function LoteDetalleDialog({ loteId, onClose }: { loteId: number | null; onClose
             <dd className="font-medium">{query.data.nombreArchivo}</dd>
           </div>
           <div>
-            <dt className="text-xs text-muted-foreground">Fecha</dt>
-            <dd className="font-medium">{formatDate(query.data.createdAt)}</dd>
+            <dt className="text-xs text-muted-foreground">Fecha de importación</dt>
+            <dd className="font-medium">{formatDateTime(query.data.createdAt)}</dd>
           </div>
           <div>
             <dt className="text-xs text-muted-foreground">Importado por</dt>
