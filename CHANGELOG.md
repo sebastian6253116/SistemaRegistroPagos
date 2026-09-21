@@ -678,3 +678,65 @@ el importador, con **una fila de ejemplo** que sirva de guía y que el usuario r
 - `web/src/features/importacion/ImportacionPage.tsx` — botón «Descargar plantilla» + aviso.
 - `docs/openapi.yaml`, `docs/postman_collection.json`, los tres README, `CAMBIOS-SOLICITADOS.md` y
   este CHANGELOG — sincronización documental.
+
+---
+
+## 12. Sincronización usuario ↔ cobrador (corrección en producción)
+
+Falla reportada: «cuando activo los cobradores, como usuario admin no puedo ver los cobradores
+activos desde el formulario de registrar pagos».
+
+### 12.1 Diagnóstico (verificado en código, en el bundle desplegado y en la base)
+
+| Verificación | Resultado |
+|---|---|
+| El campo «Cobrador (reportar a nombre de)» existe y está desplegado | El bundle que sirve el propio API (`ReportarPage-*.js`) contiene la condición `pagos.ver_todos` y la opción «Yo mismo»: es idéntico a `web/src/features/pagos/ReportarPage.tsx`. |
+| Permiso del administrador | El rol `Administrador` tiene `pagos.ver_todos` y `cobradores.ver` (38 permisos). El campo **sí** se renderiza para el admin. |
+| Endpoint | `GET /api/cobradores?pageSize=200&activo=true` con sesión de admin responde **200** y devuelve los 2 cobradores activos existentes. |
+
+**Causa raíz (no era un bug de permisos):** en el sistema un cobrador **no** es un usuario con el rol
+`Cobrador`. Es una fila de la tabla `cobradores` (con su propio `codigo`) que **se vincula** a un
+usuario, y el formulario de pago solo puede ofrecer filas que existan. La operación del negocio fue
+crear y activar usuarios con el rol `Cobrador` desde Configuración → Usuarios; esos usuarios **no**
+tenían fila de cobrador, así que no aparecían. En la base auditada: **4** usuarios con rol `Cobrador`
+pero solo **2** filas en `cobradores`.
+
+### 12.2 Delta
+
+Sincronización automática entre ambos conceptos (`api/src/lib/cobrador-sync.ts`):
+
+- Un usuario con rol `Cobrador` **siempre** tiene fila de cobrador vinculada.
+- La fila **refleja** el `nombreCompleto` y el `activo` del usuario.
+- Si el usuario deja de ser cobrador (cambio de rol, desactivación o baja lógica), la fila se
+  **desactiva**, nunca se borra: los pagos ya reportados conservan su referencia.
+- El `codigo` se deriva del nombre de usuario (sin acentos, en mayúsculas, separadores normalizados,
+  tope de 40 caracteres) y la unicidad se resuelve contra la base con sufijo `-2`, `-3`…
+
+### 12.3 Puntos de enganche
+
+| Dónde | Qué hace |
+|---|---|
+| `usuarios.service.ts` `create` / `update` / `remove` | Llama a la sincronización después de auditar. Es **best-effort**: un fallo al provisionar el cobrador **nunca** falla la escritura del usuario. |
+| `index.ts` (arranque) | `repararCobradoresFaltantes()` repara los datos previos: crea la fila que falte para cada usuario con rol `Cobrador`. Es **idempotente y estrictamente aditiva** (no toca cobradores existentes) y un fallo no impide arrancar la API. |
+
+> **Sin migración y sin endpoints nuevos:** OpenAPI sigue en **101** operaciones y Postman en **101**
+> peticiones. La reparación inicial corre en el arranque, junto a `prisma migrate deploy`.
+
+### 12.4 Verificación
+
+- **Tests unitarios:** `npm test` en `api/` → **83 tests en verde** (antes 77): se agregó
+  `api/tests/cobrador-sync.test.ts` con 6 casos sobre `codigoBaseDesdeUsuario`.
+- **Compilación:** `npm run build` (`tsc`) sin errores.
+- **Verificación contra la base de producción, con rollback:** la sincronización completa se ejecutó
+  dentro de una transacción que termina en `throw`, de modo que **no se persistió nada** (`cobradores`
+  seguía en 2 antes y después). Dentro de la transacción, `repararCobradoresFaltantes()` habría creado
+  **2** cobradores (los usuarios que no tenían fila) y `provisionarCobradorDeUsuario()` aplicado dos
+  veces sobre el mismo usuario **no** duplicó ni alteró filas.
+
+### 12.5 Archivos de esta corrección
+
+- `api/src/lib/cobrador-sync.ts` — módulo nuevo (sincronización + reparación de arranque).
+- `api/src/modules/usuarios/usuarios.service.ts` — enganches en `create` / `update` / `remove`.
+- `api/src/index.ts` — reparación idempotente en el arranque.
+- `api/tests/cobrador-sync.test.ts` — tests unitarios del generador de códigos.
+- `CHANGELOG.md` — esta entrada.

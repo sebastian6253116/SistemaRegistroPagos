@@ -1,6 +1,7 @@
 import { createApp } from './app';
 import { env } from './config/env';
 import { prisma } from './lib/prisma';
+import { repararCobradoresFaltantes } from './lib/cobrador-sync';
 import { startBcvJob, stopBcvJob } from './jobs/bcv-rate.job';
 
 async function bootstrap() {
@@ -8,6 +9,23 @@ async function bootstrap() {
 
   // Fail fast if the database is unreachable.
   await prisma.$connect();
+
+  // One-time repair for data created before user/collector synchronisation
+  // existed: every `Cobrador`-role user gets the collector row that makes them
+  // selectable in the payment form. Idempotent and strictly additive, so it is
+  // safe on every boot; a failure must never stop the API from starting.
+  try {
+    const provisionados = await repararCobradoresFaltantes();
+    if (provisionados > 0) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `Collector sync: ${provisionados} collector(s) provisioned from Cobrador-role users.`,
+      );
+    }
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Collector sync failed:', error);
+  }
 
   const server = app.listen(env.PORT, () => {
     // eslint-disable-next-line no-console

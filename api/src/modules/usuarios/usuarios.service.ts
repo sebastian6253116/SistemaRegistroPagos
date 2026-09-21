@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { ApiError, paginate, parsePagination } from '../../lib/http';
 import { prisma } from '../../lib/prisma';
 import { auditar, snapshot } from '../../lib/audit';
+import { provisionarCobradorDeUsuarioSeguro } from '../../lib/cobrador-sync';
 import type {
   CreateUsuarioInput,
   ListUsuariosQuery,
@@ -106,6 +107,10 @@ export async function create(
     ip: actor.ip,
   });
 
+  // A user with the `Cobrador` role must have a selectable collector row (see
+  // lib/cobrador-sync.ts). Best-effort: it never fails the user write.
+  await provisionarCobradorDeUsuarioSeguro(created.id);
+
   return created;
 }
 
@@ -152,6 +157,10 @@ export async function update(
     ip: actor.ip,
   });
 
+  // Mirrors the collector row: created when the user becomes a collector,
+  // renamed/activated with the user, deactivated when the role changes.
+  await provisionarCobradorDeUsuarioSeguro(after.id);
+
   return after;
 }
 
@@ -175,4 +184,8 @@ export async function remove(id: number, actor: Actor): Promise<void> {
     datosDespues: snapshot(after),
     ip: actor.ip,
   });
+
+  // The linked collector follows the user: deactivated, never deleted, so the
+  // payments already reported keep their reference.
+  await provisionarCobradorDeUsuarioSeguro(after.id);
 }
