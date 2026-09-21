@@ -740,3 +740,30 @@ Sincronización automática entre ambos conceptos (`api/src/lib/cobrador-sync.ts
 - `api/src/index.ts` — reparación idempotente en el arranque.
 - `api/tests/cobrador-sync.test.ts` — tests unitarios del generador de códigos.
 - `CHANGELOG.md` — esta entrada.
+
+### 12.6 El cobrador ve su propio cobrador (solo lectura)
+
+Regla de negocio confirmada por el dueño del proceso: **solo el usuario con `pagos.ver_todos` ve
+todos los cobradores** y puede registrar a nombre de otro; **un cobrador solo puede reportar a su
+propio nombre**.
+
+Verificación en vivo (solo lecturas contra producción): el rol `Cobrador` tiene exactamente
+`tasas.ver`, `pagos.reportar` y `pagos.ver_propios`; `GET /api/cobradores` le responde **403**
+(`Permisos insuficientes: cobradores.ver`) y `GET /api/pagos` aplica aislamiento por su `cobradorId`.
+En `reportarPago()` el `cobradorId` enviado solo se acepta si el usuario tiene `pagos.ver_todos`; en
+cualquier otro caso el backend **fuerza** el cobrador del propio usuario. Es decir: el aislamiento ya
+estaba garantizado en el servidor y no dependía del formulario.
+
+Lo que **faltaba** era visibilidad: `ReportarPage` ocultaba el campo por completo cuando el usuario no
+tenía `pagos.ver_todos`, así que el cobrador no tenía forma de saber bajo qué nombre quedaba su pago.
+
+- **API:** `AuthUser` (`api/src/middleware/auth.ts`) expone `cobrador: { id, codigo, nombre } | null`
+  en `/auth/login`, `/auth/refresh` y `/auth/me`. La fila ya se cargaba en `loadAuthUser`, así que no
+  agrega consultas. `cobradorId` se conserva por compatibilidad.
+- **UI:** `web/src/features/pagos/ReportarPage.tsx` — con `pagos.ver_todos` se mantiene el selector
+  con todos los cobradores activos más la opción «Yo mismo»; sin ese permiso se muestra el cobrador
+  propio en **solo lectura** (no editable), con un aviso cuando el usuario no tiene cobrador asignado.
+- **Contratos:** `docs/openapi.yaml` — esquema `AuthUser` y ejemplos de `/auth/login` y `/auth/me`.
+  **Sin endpoints nuevos:** OpenAPI sigue en **101** operaciones y Postman en **101** peticiones.
+- **Archivos:** `api/src/middleware/auth.ts`, `web/src/types/index.ts`,
+  `web/src/features/pagos/ReportarPage.tsx`, `docs/openapi.yaml`, `CHANGELOG.md`.

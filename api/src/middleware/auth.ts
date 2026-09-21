@@ -12,6 +12,14 @@ export interface AuthUser {
   rol: string;
   permisos: string[];
   cobradorId?: number | null;
+  /**
+   * Collector assigned to this user, when there is one.
+   *
+   * A collector reporting a payment may only report as THEMSELVES, so the form
+   * needs to show them which collector the payment will be attributed to. The
+   * row is already loaded below, so exposing it costs no extra query.
+   */
+  cobrador?: { id: number; codigo: string; nombre: string } | null;
 }
 
 declare global {
@@ -68,6 +76,9 @@ export async function loadAuthUser(userId: number): Promise<AuthUser | null> {
     rol: user.rol.nombre,
     permisos: user.rol.permisos.map((rp) => rp.permiso.clave),
     cobradorId: user.cobrador?.id ?? null,
+    cobrador: user.cobrador
+      ? { id: user.cobrador.id, codigo: user.cobrador.codigo, nombre: user.cobrador.nombre }
+      : null,
   };
 }
 

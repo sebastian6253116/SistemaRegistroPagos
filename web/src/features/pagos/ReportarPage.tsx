@@ -104,8 +104,11 @@ function resolveCatalogDefaults(
 export default function ReportarPage() {
   const toast = useToast();
   const queryClient = useQueryClient();
-  const { tiene } = usePermiso();
+  const { tiene, user } = usePermiso();
+  // Only a user with `pagos.ver_todos` may pick ANY collector. Everyone else
+  // reports as themselves, so the form shows their own collector read-only.
   const puedeElegirCobrador = tiene('pagos.ver_todos');
+  const miCobrador = user?.cobrador ?? null;
 
   const catalogo = useQuery({
     queryKey: queryKeys.catalogoFormPago(),
@@ -421,7 +424,7 @@ export default function ReportarPage() {
                   <p className="text-xs text-destructive">{errors.tipoPagoId.message}</p>
                 )}
               </div>
-              {puedeElegirCobrador && (
+              {puedeElegirCobrador ? (
                 <div className="space-y-1.5">
                   <Label htmlFor="cobradorId">Cobrador (reportar a nombre de)</Label>
                   <Select id="cobradorId" className="h-11" {...register('cobradorId')}>
@@ -432,6 +435,22 @@ export default function ReportarPage() {
                       </option>
                     ))}
                   </Select>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label htmlFor="cobradorAsignado">Cobrador (a su nombre)</Label>
+                  <Input
+                    id="cobradorAsignado"
+                    className="h-11 bg-muted"
+                    value={miCobrador ? `${miCobrador.codigo} — ${miCobrador.nombre}` : ''}
+                    placeholder="Sin cobrador asignado"
+                    readOnly
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {miCobrador
+                      ? 'Los pagos que reporte quedan registrados a su nombre. No es editable.'
+                      : 'Su usuario no tiene un cobrador asignado. Contacte al administrador.'}
+                  </p>
                 </div>
               )}
             </div>

@@ -141,6 +141,7 @@ paths:
                   rol: Administrador
                   permisos: [usuarios.ver, pagos.validar, reportes.ver]
                   cobradorId: null
+                  cobrador: null
                 tokens:
                   accessToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
                   refreshToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
@@ -330,6 +331,7 @@ paths:
                 rol: Administrador
                 permisos: [usuarios.ver, pagos.validar, reportes.ver]
                 cobradorId: null
+                cobrador: null
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -4082,6 +4084,17 @@ components:
           items: { type: string }
           example: [usuarios.ver, pagos.validar]
         cobradorId: { type: integer, nullable: true, example: null }
+        cobrador:
+          type: object
+          nullable: true
+          description: >
+            Cobrador propio del usuario. El formulario de pago lo muestra en solo lectura
+            para quien NO tiene `pagos.ver_todos`, porque ese usuario solo puede reportar
+            a su propio nombre. `null` cuando el usuario no tiene cobrador vinculado.
+          properties:
+            id: { type: integer, example: 1 }
+            codigo: { type: string, example: COB-001 }
+            nombre: { type: string, example: Pedro Rojas }
 
     AuthTokens:
       type: object

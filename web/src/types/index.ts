@@ -22,6 +22,8 @@ export interface AuthUser {
   rol: string;
   permisos: string[];
   cobradorId?: number | null;
+  /** Cobrador propio: el cobrador solo puede reportar a su nombre. */
+  cobrador?: { id: number; codigo: string; nombre: string } | null;
 }
 
 export interface AuthTokens {
