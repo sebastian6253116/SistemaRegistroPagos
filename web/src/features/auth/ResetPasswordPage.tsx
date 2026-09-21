@@ -8,6 +8,7 @@ import { resetPasswordApi } from '@/api/auth';
 import { getApiErrorMessage } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/components/ui/toast';
@@ -67,14 +68,14 @@ export default function ResetPasswordPage() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">Nueva contraseña</Label>
-              <Input id="password" type="password" className="h-11" {...register('password')} />
+              <PasswordInput id="password" className="h-11" {...register('password')} />
               {errors.password && (
                 <p className="text-xs text-destructive">{errors.password.message}</p>
               )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="confirmar">Confirmar contraseña</Label>
-              <Input id="confirmar" type="password" className="h-11" {...register('confirmar')} />
+              <PasswordInput id="confirmar" className="h-11" {...register('confirmar')} />
               {errors.confirmar && (
                 <p className="text-xs text-destructive">{errors.confirmar.message}</p>
               )}
