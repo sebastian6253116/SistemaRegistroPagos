@@ -22,7 +22,7 @@ const EnvSchema = z.object({
   BUSINESS_TIMEZONE: z.string().default('America/Caracas'),
   MATCH_AMOUNT_TOLERANCE_BS: z.coerce.number().nonnegative().default(0.01),
   MATCH_DATE_WINDOW_DAYS: z.coerce.number().int().nonnegative().default(3),
-  MATCH_REFERENCE_SUFFIX: z.coerce.number().int().positive().default(8),
+  MATCH_REFERENCE_SUFFIX: z.coerce.number().int().positive().default(4),
   UMBRAL_ANTIGUEDAD_DIAS: z.coerce.number().int().nonnegative().default(30),
 
   UPLOAD_DIR: z.string().default('uploads'),

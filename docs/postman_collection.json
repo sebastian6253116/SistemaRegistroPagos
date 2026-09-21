@@ -2045,7 +2045,7 @@
                 "coincidencias"
               ]
             },
-            "description": "Requiere permiso: pagos.validar. Devuelve `{ data, duplicado }`: `data` es el array de coincidencias puntuadas (forma original) y `duplicado` es una senal ADITIVA nullable (CR-001) con el movimiento ya conciliado con otro pago que coincide por referencia + monto en Bs (misma cuenta, sin ventana de fecha), o null si el pago no es duplicado. El contraste de referencia usa el ultimo `match.reference_suffix` (8) de la referencia reportada, o sus digitos si es mas corta, con un minimo de 4 digitos.",
+            "description": "Requiere permiso: pagos.validar. Devuelve `{ data, duplicado }`: `data` es el array de coincidencias puntuadas (forma original) y `duplicado` es una senal ADITIVA nullable (CR-001) con el movimiento ya conciliado con otro pago que coincide por referencia + monto en Bs (misma cuenta, sin ventana de fecha), o null si el pago no es duplicado. El contraste de referencia usa el ultimo `match.reference_suffix` (4) de la referencia reportada, o sus digitos si es mas corta, con un minimo de 4 digitos.",
             "variable": [
               {
                 "key": "id",

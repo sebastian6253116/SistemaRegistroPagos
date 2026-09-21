@@ -172,7 +172,7 @@ const TIPO_PAGO_DEFAULT = 'Pago Móvil';
 const PARAMETROS = [
   { clave: 'match.amount_tolerance_bs', valor: '0.01', descripcion: 'Tolerancia en bolivares al cruzar montos' },
   { clave: 'match.date_window_days', valor: '3', descripcion: 'Ventana de dias (+/-) para la fecha de ejecucion' },
-  { clave: 'match.reference_suffix', valor: '8', descripcion: 'Ultimos N digitos usados para referencia parcial' },
+  { clave: 'match.reference_suffix', valor: '4', descripcion: 'Ultimos N digitos usados para referencia parcial' },
   { clave: 'cobro.umbral_antiguedad_dias', valor: '30', descripcion: 'Dias para clasificar un cobro como viejo' },
   { clave: 'login.max_attempts', valor: '5', descripcion: 'Intentos fallidos antes de bloquear el usuario' },
   { clave: 'login.lock_minutes', valor: '15', descripcion: 'Minutos de bloqueo tras superar los intentos' },

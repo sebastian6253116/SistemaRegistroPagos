@@ -80,7 +80,7 @@ describe('referenciasCoinciden (CR-001 R1: 4-digit contrast floor)', () => {
   });
 });
 
-describe('referenciasCoinciden (spec 5.2: exact and last 6-8 digits)', () => {
+describe('referenciasCoinciden (spec 5.2: exact and suffix match)', () => {
   it('matches exactly', () => {
     expect(referenciasCoinciden('12345678', '12345678', 8)).toEqual({ exacta: true, sufijo: false });
   });
@@ -96,6 +96,47 @@ describe('referenciasCoinciden (spec 5.2: exact and last 6-8 digits)', () => {
     const r = referenciasCoinciden('12345678', '87654321', 8);
     expect(r.exacta).toBe(false);
     expect(r.sufijo).toBe(false);
+  });
+});
+
+describe('referenciasCoinciden (4-digit suffix contrast)', () => {
+  const SUFFIX = 4;
+
+  it('matches a longer bank reference that shares the reported last 4 digits', () => {
+    // Last 4 digits coincide ("5678"); the last 8 do NOT ("11115678" vs "99995678").
+    const r = referenciasCoinciden('11115678', '120099995678', SUFFIX);
+    expect(r.exacta).toBe(false);
+    expect(r.sufijo).toBe(true);
+  });
+
+  it('does not contrast when only the last 3 digits coincide', () => {
+    // "5678" vs "9999678" share the trailing "678" but differ at the 4th digit.
+    const r = referenciasCoinciden('5678', '9999678', SUFFIX);
+    expect(r.exacta).toBe(false);
+    expect(r.sufijo).toBe(false);
+  });
+
+  it('still enforces MIN_DIGITOS_CONTRASTE for references shorter than 4 digits', () => {
+    for (const ref of ['1', '12', '123']) {
+      const r = referenciasCoinciden(ref, `99999${ref}`, SUFFIX);
+      expect(r.sufijo).toBe(false);
+    }
+    expect(MIN_DIGITOS_CONTRASTE).toBe(4);
+  });
+
+  it('drives the contrast through the configured suffix in calcularPuntaje', () => {
+    const pagoLargo = pago({ referencia: '11115678' });
+    const movBanco = mov({ referencia: '120099995678' });
+
+    const con4 = calcularPuntaje(pagoLargo, movBanco, { ...CONFIG, referenciaSufijo: 4 });
+    expect(con4).not.toBeNull();
+    expect(con4!.coincidenciaSufijo).toBe(true);
+
+    // The old 8-digit contrast does NOT match the same pair, so these assertions
+    // fail if the engine ignores `referenciaSufijo`.
+    expect(
+      calcularPuntaje(pagoLargo, movBanco, { ...CONFIG, referenciaSufijo: 8 }),
+    ).toBeNull();
   });
 });
 

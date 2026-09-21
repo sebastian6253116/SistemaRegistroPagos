@@ -140,7 +140,7 @@ npm test
 | `BUSINESS_TIMEZONE` | Zona horaria del negocio | `America/Caracas` |
 | `MATCH_AMOUNT_TOLERANCE_BS` | Tolerancia de monto (Bs) al conciliar | `0.01` |
 | `MATCH_DATE_WINDOW_DAYS` | Ventana de fechas (± días) | `3` |
-| `MATCH_REFERENCE_SUFFIX` | Dígitos finales para referencia parcial | `8` |
+| `MATCH_REFERENCE_SUFFIX` | Dígitos finales para referencia parcial | `4` |
 | `UMBRAL_ANTIGUEDAD_DIAS` | Umbral nuevo/viejo | `30` |
 | `UPLOAD_DIR` | Carpeta de soportes | `uploads` |
 
@@ -230,7 +230,7 @@ tasa = monto_bs / monto_usd      # 3.600,00 Bs / 20,00 USD = 180,000000
 ### 8.2 Conciliación
 
 - Coincidencia por **referencia** exacta **o por sufijo de dígitos**, siempre normalizada a
-  dígitos. El sufijo de contraste es el último `match.reference_suffix` (8 por defecto) de la
+  dígitos. El sufijo de contraste es el último `match.reference_suffix` (4 por defecto) de la
   referencia reportada, o sus propios dígitos si es más corta, con un **mínimo de 4 dígitos**
   (`MIN_DIGITOS_CONTRASTE`): una referencia con menos de 4 dígitos ya no matchea por sufijo,
   solo por igualdad exacta.

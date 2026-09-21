@@ -198,7 +198,7 @@ Motor: `src/modules/conciliacion/matcher.ts`.
 
 - **Contraste por referencia.** La referencia se compara **normalizada a dígitos**
   (`normalizarReferencia`, p. ej. `12-34` → `1234`). El sufijo de contraste es el último
-  `match.reference_suffix` (**8** por defecto) de la referencia reportada, o sus propios
+  `match.reference_suffix` (**4** por defecto) de la referencia reportada, o sus propios
   dígitos si es más corta. Se exige un **mínimo de 4 dígitos** (`MIN_DIGITOS_CONTRASTE`): una
   referencia con menos de 4 dígitos **no** matchea por sufijo, solo por **igualdad exacta**.
   La comparación es de doble sentido: `db.endsWith(sufijoA) || da.endsWith(sufijoB) ||

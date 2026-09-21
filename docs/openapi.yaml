@@ -2508,7 +2508,7 @@ paths:
       description: |
         Requiere permiso: pagos.validar. Si se omite `movimientoBancoId`, se usa la
         mejor coincidencia automatica: el contraste de referencia usa el ultimo
-        `match.reference_suffix` (8) de la referencia reportada, o sus propios digitos
+        `match.reference_suffix` (4) de la referencia reportada, o sus propios digitos
         si es mas corta, con un minimo de 4 digitos (una referencia con menos de 4
         digitos ya no matchea por sufijo, solo por igualdad exacta); exige ademas el
         monto en Bs dentro de `match.amount_tolerance_bs` y la fecha dentro de
