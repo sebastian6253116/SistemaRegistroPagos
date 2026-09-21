@@ -11,7 +11,7 @@
  * Run with:  npm run seed
  */
 import { PrismaClient, Prisma } from '@prisma/client';
-import bcrypt from 'bcryptjs';
+import { hashPassword } from './admin-shared';
 
 const prisma = new PrismaClient();
 
@@ -351,7 +351,7 @@ async function main() {
   for (const u of USUARIOS) {
     const rolId = rolByName.get(u.rol);
     if (!rolId) throw new Error(`Rol no encontrado: ${u.rol}`);
-    const passwordHash = await bcrypt.hash(u.password, 10);
+    const passwordHash = await hashPassword(u.password);
     await prisma.usuario.upsert({
       where: { usuario: u.usuario },
       update: { email: u.email, nombreCompleto: u.nombreCompleto, rolId, passwordHash, activo: true },
