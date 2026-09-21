@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { editarPago } from '@/api/pagos';
 import { getApiErrorMessage } from '@/api/client';
-import { derivedRate, formatDate, formatRate } from '@/lib/format';
+import { derivedRate, formatRate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/toast';
 import type { PagoReportado } from '@/types';
 
 interface EditarPagoForm {
+  fechaPago: string;
   referencia: string;
   montoBs: string;
   montoUsd: string;
@@ -24,8 +25,19 @@ export interface EditarPagoDialogProps {
   onSuccess?: () => void;
 }
 
+/**
+ * `fechaPago` maps to a DATE column, so the API serializes it as a UTC-midnight
+ * ISO string. The calendar date is therefore the UTC date part. Reading it with
+ * local getters would shift the day for negative UTC offsets and, because this
+ * dialog writes the field back on save, would silently move the payment's date.
+ */
+function fechaPagoInput(pago: PagoReportado | null): string {
+  return (pago?.fechaPago ?? '').slice(0, 10);
+}
+
 function formDesdePago(pago: PagoReportado | null): EditarPagoForm {
   return {
+    fechaPago: fechaPagoInput(pago),
     referencia: pago?.referencia ?? '',
     montoBs: pago?.montoBs ?? '',
     montoUsd: pago?.montoUsd ?? '',
@@ -50,6 +62,7 @@ export function EditarPagoDialog({ pago, onClose, onSuccess }: EditarPagoDialogP
     mutationFn: () => {
       if (!pago) throw new Error('Sin pago');
       return editarPago(pago.id, {
+        fechaPago: form.fechaPago,
         referencia: form.referencia,
         montoBs: form.montoBs.replace(',', '.'),
         montoUsd: form.montoUsd.replace(',', '.'),
@@ -85,7 +98,11 @@ export function EditarPagoDialog({ pago, onClose, onSuccess }: EditarPagoDialogP
           <Button variant="outline" onClick={onClose}>
             Cancelar
           </Button>
-          <Button loading={edicionMutation.isPending} onClick={() => edicionMutation.mutate()}>
+          <Button
+            loading={edicionMutation.isPending}
+            disabled={!form.fechaPago}
+            onClick={() => edicionMutation.mutate()}
+          >
             Guardar cambios
           </Button>
         </>
@@ -95,11 +112,22 @@ export function EditarPagoDialog({ pago, onClose, onSuccess }: EditarPagoDialogP
         {esValidado && (
           <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">
             Este pago está validado y conciliado con un movimiento bancario. Al guardar, el sistema
-            vuelve a evaluar la conciliación: si la edición rompe la coincidencia, no se aplicará y
-            deberá revertir la validación antes de editar.
+            vuelve a evaluar la conciliación usando la referencia, el monto y la fecha de pago: si la
+            edición rompe la coincidencia, no se aplicará y deberá revertir la validación antes de
+            editar.
           </div>
         )}
 
+        <div className="space-y-1.5">
+          <Label htmlFor="edit-fecha">Fecha de pago</Label>
+          <Input
+            id="edit-fecha"
+            type="date"
+            className="h-11"
+            value={form.fechaPago}
+            onChange={(e) => setForm({ ...form, fechaPago: e.target.value })}
+          />
+        </div>
         <div className="space-y-1.5">
           <Label htmlFor="edit-ref">Referencia</Label>
           <Input
@@ -155,7 +183,7 @@ export function EditarPagoDialog({ pago, onClose, onSuccess }: EditarPagoDialogP
         </div>
         {pago && (
           <p className="text-xs text-muted-foreground">
-            Fecha de pago: {formatDate(pago.fechaPago)} · Cuenta: {pago.cuentaRecaudadora.banco.nombre}
+            Cuenta: {pago.cuentaRecaudadora.banco.nombre}
           </p>
         )}
       </div>
