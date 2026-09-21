@@ -26,11 +26,13 @@ const PERMISOS: PermisoDef[] = [
   { clave: 'usuarios.crear', descripcion: 'Crear usuarios' },
   { clave: 'usuarios.editar', descripcion: 'Editar usuarios' },
   { clave: 'usuarios.eliminar', descripcion: 'Desactivar/eliminar usuarios' },
+  { clave: 'usuarios.eliminar_definitivo', descripcion: 'Eliminar definitivamente usuarios sin historial' },
   { clave: 'roles.ver', descripcion: 'Ver roles y permisos' },
   { clave: 'roles.gestionar', descripcion: 'Crear/editar roles y asignar permisos' },
   // Catalogs
   { clave: 'cobradores.ver', descripcion: 'Ver cobradores' },
   { clave: 'cobradores.gestionar', descripcion: 'Crear/editar cobradores' },
+  { clave: 'cobradores.eliminar_definitivo', descripcion: 'Eliminar definitivamente cobradores sin pagos' },
   { clave: 'bancos.ver', descripcion: 'Ver bancos' },
   { clave: 'bancos.gestionar', descripcion: 'Crear/editar bancos' },
   { clave: 'tipos_pago.ver', descripcion: 'Ver tipos de pago' },

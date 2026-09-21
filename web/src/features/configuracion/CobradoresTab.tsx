@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Pencil, Plus, UserX } from 'lucide-react';
+import { Pencil, Plus, Trash2, UserX } from 'lucide-react';
 import {
   actualizarCobrador,
   crearCobrador,
   desactivarCobrador,
+  eliminarCobradorDefinitivo,
   listarCobradores,
   type CobradorInput,
 } from '@/api/cobradores';
@@ -54,6 +55,7 @@ export default function CobradoresTab() {
   const [form, setForm] = useState<FormState>(empty);
   const [formError, setFormError] = useState<string | null>(null);
   const [desactivar, setDesactivar] = useState<Cobrador | null>(null);
+  const [definitivo, setDefinitivo] = useState<Cobrador | null>(null);
 
   const usuariosQuery = useQuery({
     queryKey: queryKeys.usuarios({ pageSize: 200 }),
@@ -99,6 +101,16 @@ export default function CobradoresTab() {
       queryClient.invalidateQueries({ queryKey: ['cobradores'] });
     },
     onError: (error) => toast.error('No se pudo desactivar', getApiErrorMessage(error)),
+  });
+
+  const eliminarDefinitivo = useMutation({
+    mutationFn: (id: number) => eliminarCobradorDefinitivo(id),
+    onSuccess: () => {
+      toast.success('Cobrador eliminado');
+      setDefinitivo(null);
+      queryClient.invalidateQueries({ queryKey: ['cobradores'] });
+    },
+    onError: (error) => toast.error('No se pudo eliminar el cobrador', getApiErrorMessage(error)),
   });
 
   const columns = useMemo<ColumnDef<Cobrador, unknown>[]>(
@@ -150,6 +162,17 @@ export default function CobradoresTab() {
                 onClick={() => setDesactivar(row.original)}
               >
                 <UserX className="h-4 w-4" />
+              </Button>
+            )}
+            {tiene('cobradores.eliminar_definitivo') && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-destructive"
+                aria-label="Eliminar definitivamente"
+                onClick={() => setDefinitivo(row.original)}
+              >
+                <Trash2 className="h-4 w-4" />
               </Button>
             )}
           </div>
@@ -236,27 +259,29 @@ export default function CobradoresTab() {
                   </dd>
                 </div>
               </dl>
-              {tiene('cobradores.gestionar') && (
+              {(tiene('cobradores.gestionar') || tiene('cobradores.eliminar_definitivo')) && (
                 <div className="flex flex-wrap items-center gap-1 pt-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setEditando(row);
-                      setForm({
-                        nombre: row.nombre,
-                        codigo: row.codigo,
-                        usuarioId: row.usuarioId ? String(row.usuarioId) : '',
-                        activo: row.activo,
-                      });
-                      setFormError(null);
-                      setDialogOpen(true);
-                    }}
-                  >
-                    <Pencil className="h-4 w-4" />
-                    Editar
-                  </Button>
-                  {row.activo && (
+                  {tiene('cobradores.gestionar') && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEditando(row);
+                        setForm({
+                          nombre: row.nombre,
+                          codigo: row.codigo,
+                          usuarioId: row.usuarioId ? String(row.usuarioId) : '',
+                          activo: row.activo,
+                        });
+                        setFormError(null);
+                        setDialogOpen(true);
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                      Editar
+                    </Button>
+                  )}
+                  {tiene('cobradores.gestionar') && row.activo && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -265,6 +290,17 @@ export default function CobradoresTab() {
                     >
                       <UserX className="h-4 w-4" />
                       Desactivar
+                    </Button>
+                  )}
+                  {tiene('cobradores.eliminar_definitivo') && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-destructive"
+                      onClick={() => setDefinitivo(row)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Eliminar definitivamente
                     </Button>
                   )}
                 </div>
@@ -340,6 +376,17 @@ export default function CobradoresTab() {
         confirmLabel="Desactivar"
         destructive
         loading={baja.isPending}
+      />
+
+      <ConfirmDialog
+        open={definitivo !== null}
+        onClose={() => setDefinitivo(null)}
+        onConfirm={() => definitivo && eliminarDefinitivo.mutate(definitivo.id)}
+        title="Eliminar cobrador definitivamente"
+        description="Esta acción es IRREVERSIBLE y eliminará el cobrador de forma permanente. Se rechazará si el cobrador tiene pagos reportados. ¿Desea continuar?"
+        confirmLabel="Eliminar definitivamente"
+        destructive
+        loading={eliminarDefinitivo.isPending}
       />
     </div>
   );

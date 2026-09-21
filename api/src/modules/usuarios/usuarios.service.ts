@@ -189,3 +189,91 @@ export async function remove(id: number, actor: Actor): Promise<void> {
   // payments already reported keep their reference.
   await provisionarCobradorDeUsuarioSeguro(after.id);
 }
+
+/**
+ * Hard delete: permanently removes the user (and its linked collector).
+ *
+ * Refused with 409 when the record has dependent business records, so the
+ * operation is always all-or-nothing and never leaves partial data behind.
+ * The checks and the delete share ONE transaction: a row inserted meanwhile
+ * cannot slip past the counts and surface later as a raw FK error.
+ */
+export async function removeDefinitivo(id: number, actor: Actor): Promise<void> {
+  if (id === actor.usuarioId) {
+    throw ApiError.badRequest('No puede eliminar su propio usuario');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const before = await tx.usuario.findUnique({
+      where: { id },
+      include: { cobrador: { select: { id: true } } },
+    });
+    if (!before) throw ApiError.notFound('Usuario no encontrado');
+
+    const cobradorId = before.cobrador?.id ?? null;
+
+    const [gastos, conciliaciones, lotes, pagosValidados, pagosCobrador] = await Promise.all([
+      tx.gasto.count({ where: { registradoPor: id } }),
+      tx.conciliacion.count({ where: { usuarioId: id } }),
+      tx.loteImportacion.count({ where: { usuarioId: id } }),
+      tx.pagoReportado.count({ where: { validadoPor: id } }),
+      cobradorId !== null
+        ? tx.pagoReportado.count({ where: { cobradorId } })
+        : Promise.resolve(0),
+    ]);
+
+    const blockers: string[] = [];
+    if (gastos > 0) blockers.push(`${gastos} gasto(s)`);
+    if (conciliaciones > 0) blockers.push(`${conciliaciones} conciliacion(es)`);
+    if (lotes > 0) blockers.push(`${lotes} lote(s) de importacion`);
+    if (pagosValidados > 0) blockers.push(`${pagosValidados} pago(s) validado(s)`);
+    if (pagosCobrador > 0) blockers.push(`${pagosCobrador} pago(s) del cobrador vinculado`);
+
+    if (blockers.length > 0) {
+      throw ApiError.conflict(
+        `No se puede eliminar definitivamente: el usuario tiene ${blockers.join(', ')}. Desactive el usuario en su lugar.`,
+      );
+    }
+
+    // FK behaviour at this point: the audit log survives (auditoria.usuario_id is
+    // ON DELETE SET NULL, so its rows stay with a cleared actor), which is why it
+    // is NOT a blocker. `refresh_tokens`, `password_resets` and `notificaciones`
+    // are CASCADE and go away with the user. `pagos_reportados.validado_por` is
+    // SET NULL and is normally unreachable because `pagosValidados` is refused
+    // above, but the counts read the transaction snapshot while the delete below
+    // re-checks the FK against the latest committed rows: a concurrent validation
+    // can still make it reachable, and the P2003 branch turns that into a 409.
+    try {
+      if (cobradorId !== null) {
+        await tx.cobrador.delete({ where: { id: cobradorId } });
+      }
+      await tx.usuario.delete({ where: { id } });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+        // Keep the raw FK error in the log: without it the dependent table that
+        // fired is invisible, and errorHandler only logs errors it does not know.
+        // eslint-disable-next-line no-console
+        console.error('Hard delete blocked by a foreign key:', err);
+        throw ApiError.conflict(
+          'No se puede eliminar definitivamente: el registro adquirió datos asociados mientras se procesaba la solicitud. Recargue e intente de nuevo.',
+        );
+      }
+      throw err;
+    }
+
+    // Auditing inside the transaction: the deletion is irreversible and the audit
+    // entry is the only surviving trace of who performed it. `auditar` rethrows
+    // inside a transaction, so a failed write aborts the whole delete.
+    await auditar(
+      {
+        usuarioId: actor.usuarioId,
+        entidad: 'usuarios',
+        entidadId: id,
+        accion: 'borrar_definitivo',
+        datosAntes: snapshot(sinPassword(before)),
+        ip: actor.ip,
+      },
+      tx,
+    );
+  });
+}

@@ -7,7 +7,15 @@ export interface AuditInput {
   usuarioId?: number | null;
   entidad: string;
   entidadId?: number | null;
-  accion: 'crear' | 'editar' | 'validar' | 'rechazar' | 'borrar' | 'importar' | 'login';
+  accion:
+    | 'crear'
+    | 'editar'
+    | 'validar'
+    | 'rechazar'
+    | 'borrar'
+    | 'borrar_definitivo'
+    | 'importar'
+    | 'login';
   datosAntes?: unknown;
   datosDespues?: unknown;
   ip?: string | null;

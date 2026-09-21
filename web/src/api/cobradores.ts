@@ -34,3 +34,7 @@ export async function actualizarCobrador(
 export async function desactivarCobrador(id: number): Promise<void> {
   await api.delete(`/cobradores/${id}`);
 }
+
+export async function eliminarCobradorDefinitivo(id: number): Promise<void> {
+  await api.delete(`/cobradores/${id}/definitivo`);
+}

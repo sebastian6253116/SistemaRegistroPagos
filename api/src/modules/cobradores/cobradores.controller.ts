@@ -29,3 +29,8 @@ export const remove = asyncHandler(async (req: Request, res: Response) => {
   await service.remove(Number(req.params.id), actor(req));
   res.status(204).send();
 });
+
+export const removeDefinitivo = asyncHandler(async (req: Request, res: Response) => {
+  await service.removeDefinitivo(Number(req.params.id), actor(req));
+  res.status(204).send();
+});

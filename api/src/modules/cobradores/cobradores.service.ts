@@ -156,3 +156,55 @@ export async function remove(id: number, actor: Actor): Promise<void> {
     ip: actor.ip,
   });
 }
+
+/**
+ * Hard delete: permanently removes the collector.
+ *
+ * Refused with 409 when it already has reported payments (the FK is RESTRICT),
+ * so the operation never deletes anything partially. The check and the delete
+ * share ONE transaction, so a payment inserted meanwhile surfaces as a clean
+ * 409 instead of a raw FK error.
+ */
+export async function removeDefinitivo(id: number, actor: Actor): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const before = await tx.cobrador.findUnique({ where: { id } });
+    if (!before) throw ApiError.notFound('Cobrador no encontrado');
+
+    const pagos = await tx.pagoReportado.count({ where: { cobradorId: id } });
+    if (pagos > 0) {
+      throw ApiError.conflict(
+        `No se puede eliminar definitivamente: el cobrador tiene ${pagos} pago(s) reportado(s). Desactívelo en su lugar.`,
+      );
+    }
+
+    try {
+      await tx.cobrador.delete({ where: { id } });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+        // Keep the raw FK error in the log: without it the dependent table that
+        // fired is invisible, and errorHandler only logs errors it does not know.
+        // eslint-disable-next-line no-console
+        console.error('Hard delete blocked by a foreign key:', err);
+        throw ApiError.conflict(
+          'No se puede eliminar definitivamente: el registro adquirió datos asociados mientras se procesaba la solicitud. Recargue e intente de nuevo.',
+        );
+      }
+      throw err;
+    }
+
+    // Auditing inside the transaction: the deletion is irreversible and the audit
+    // entry is the only surviving trace of who performed it. `auditar` rethrows
+    // inside a transaction, so a failed write aborts the whole delete.
+    await auditar(
+      {
+        usuarioId: actor.usuarioId,
+        entidad: 'cobradores',
+        entidadId: id,
+        accion: 'borrar_definitivo',
+        datosAntes: snapshot(before),
+        ip: actor.ip,
+      },
+      tx,
+    );
+  });
+}

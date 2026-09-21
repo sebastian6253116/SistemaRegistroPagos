@@ -185,17 +185,18 @@ Creados por `npm run seed`. **Cambie estas credenciales antes de usar el sistema
 Modelo **granular**: tabla `permisos` + `rol_permisos`, verificado en middleware del backend
 **y** usado para ocultar UI en el frontend (`usePermiso`, `<RequierePermiso>`, `ProtectedRoute`).
 
-Claves principales (el seed define **38** en total): `pagos.reportar`, `pagos.ver_propios`,
+Claves principales (el seed define **40** en total): `pagos.reportar`, `pagos.ver_propios`,
 `pagos.ver_todos`, `pagos.validar`, `pagos.rechazar`, `pagos.marcar_duplicado`,
 `pagos.validar_lote`, `pagos.eliminar`, `pagos.revertir_validacion`, `pagos.editar`,
 `movimientos.ver`,
 `movimientos.importar`, `gastos.*`, `tipos_pago.ver`, `tipos_pago.gestionar`, `tasas.ver`,
-`tasas.gestionar`, `cobradores.ver`, `cobradores.gestionar`, `bancos.ver`, `bancos.gestionar`,
+`tasas.gestionar`, `cobradores.ver`, `cobradores.gestionar`, `cobradores.eliminar_definitivo`,
+`bancos.ver`, `bancos.gestionar`,
 `cuentas.ver`, `cuentas.gestionar`, `dashboard.ver`, `reportes.ver`, `reportes.exportar`,
-`usuarios.*`, `roles.*`, `config.ver`, `config.editar`, `auditoria.ver`.
+`usuarios.*`, `usuarios.eliminar_definitivo`, `roles.*`, `config.ver`, `config.editar`, `auditoria.ver`.
 
-**Conteo de permisos por rol (verificado en la base):** Administrador **38** (todos),
-Administrativo **19**, Consultor **10** y Cobrador **3**; el catálogo total sigue en **38** claves.
+**Conteo de permisos por rol (verificado en la base):** Administrador **40** (todos),
+Administrativo **19**, Consultor **10** y Cobrador **3**; el catálogo total sigue en **40** claves.
 
 **`pagos.ver_todos` es un permiso de SOLO LECTURA.** Permite ver los pagos de todos los
 cobradores (listado y detalle), pero **no** concede escritura: las rutas de escritura sobre pagos

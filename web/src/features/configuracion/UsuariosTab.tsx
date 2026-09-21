@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Pencil, Plus, UserX } from 'lucide-react';
+import { Pencil, Plus, Trash2, UserX } from 'lucide-react';
 import {
   actualizarUsuario,
   crearUsuario,
   desactivarUsuario,
+  eliminarUsuarioDefinitivo,
   listarUsuarios,
   type UsuarioInput,
 } from '@/api/usuarios';
@@ -59,6 +60,7 @@ export default function UsuariosTab() {
   const [form, setForm] = useState<FormState>(empty);
   const [formError, setFormError] = useState<string | null>(null);
   const [desactivar, setDesactivar] = useState<Usuario | null>(null);
+  const [definitivo, setDefinitivo] = useState<Usuario | null>(null);
 
   const rolesQuery = useQuery({
     queryKey: queryKeys.roles({ pageSize: 200 }),
@@ -114,6 +116,16 @@ export default function UsuariosTab() {
     onError: (error) => toast.error('No se pudo desactivar', getApiErrorMessage(error)),
   });
 
+  const eliminarDefinitivo = useMutation({
+    mutationFn: (id: number) => eliminarUsuarioDefinitivo(id),
+    onSuccess: () => {
+      toast.success('Usuario eliminado');
+      setDefinitivo(null);
+      queryClient.invalidateQueries({ queryKey: ['usuarios'] });
+    },
+    onError: (error) => toast.error('No se pudo eliminar el usuario', getApiErrorMessage(error)),
+  });
+
   const columns = useMemo<ColumnDef<Usuario, unknown>[]>(
     () => [
       { accessorKey: 'nombreCompleto', header: 'Nombre' },
@@ -162,6 +174,17 @@ export default function UsuariosTab() {
                 onClick={() => setDesactivar(row.original)}
               >
                 <UserX className="h-4 w-4" />
+              </Button>
+            )}
+            {tiene('usuarios.eliminar_definitivo') && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-destructive"
+                aria-label="Eliminar definitivamente"
+                onClick={() => setDefinitivo(row.original)}
+              >
+                <Trash2 className="h-4 w-4" />
               </Button>
             )}
           </div>
@@ -270,7 +293,7 @@ export default function UsuariosTab() {
                   <dd className="truncate">{row.rol.nombre}</dd>
                 </div>
               </dl>
-              {(tiene('usuarios.editar') || (tiene('usuarios.eliminar') && row.activo)) && (
+              {(tiene('usuarios.editar') || (tiene('usuarios.eliminar') && row.activo) || tiene('usuarios.eliminar_definitivo')) && (
                 <div className="flex flex-wrap items-center gap-1 pt-1">
                   {tiene('usuarios.editar') && (
                     <Button
@@ -303,6 +326,17 @@ export default function UsuariosTab() {
                     >
                       <UserX className="h-4 w-4" />
                       Desactivar
+                    </Button>
+                  )}
+                  {tiene('usuarios.eliminar_definitivo') && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-destructive"
+                      onClick={() => setDefinitivo(row)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Eliminar definitivamente
                     </Button>
                   )}
                 </div>
@@ -386,6 +420,17 @@ export default function UsuariosTab() {
         confirmLabel="Desactivar"
         destructive
         loading={baja.isPending}
+      />
+
+      <ConfirmDialog
+        open={definitivo !== null}
+        onClose={() => setDefinitivo(null)}
+        onConfirm={() => definitivo && eliminarDefinitivo.mutate(definitivo.id)}
+        title="Eliminar usuario definitivamente"
+        description="Esta acción es IRREVERSIBLE y eliminará el usuario de forma permanente. Se rechazará si el usuario tiene historial asociado (gastos, conciliaciones, lotes, pagos validados o un cobrador vinculado con pagos). El registro de auditoría se conserva, solo pierde la referencia al usuario. ¿Desea continuar?"
+        confirmLabel="Eliminar definitivamente"
+        destructive
+        loading={eliminarDefinitivo.isPending}
       />
     </div>
   );

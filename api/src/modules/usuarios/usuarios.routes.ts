@@ -44,5 +44,11 @@ router.delete(
   validate({ params: usuarioIdParamSchema }),
   controller.remove,
 );
+router.delete(
+  '/:id/definitivo',
+  requirePermiso('usuarios.eliminar_definitivo'),
+  validate({ params: usuarioIdParamSchema }),
+  controller.removeDefinitivo,
+);
 
 export default router;

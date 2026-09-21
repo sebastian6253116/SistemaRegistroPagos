@@ -44,5 +44,11 @@ router.delete(
   validate({ params: cobradorIdParamSchema }),
   controller.remove,
 );
+router.delete(
+  '/:id/definitivo',
+  requirePermiso('cobradores.eliminar_definitivo'),
+  validate({ params: cobradorIdParamSchema }),
+  controller.removeDefinitivo,
+);
 
 export default router;

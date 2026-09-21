@@ -555,6 +555,30 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /usuarios/{id}/definitivo:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    delete:
+      tags: [Usuarios]
+      operationId: deleteUsuarioDefinitivo
+      summary: Eliminar usuario definitivamente (hard delete)
+      description: 'Requiere permiso: usuarios.eliminar_definitivo. Elimina el usuario de forma permanente (y su cobrador vinculado si existe). Rechaza con 409 si tiene registros dependientes (gastos, conciliaciones, importaciones, pagos validados o pagos del cobrador vinculado); tambien rechaza con 400 el auto-borrado. El registro de auditoria se conserva: sus filas sobreviven con el actor en NULL.'
+      responses:
+        '204':
+          description: Usuario eliminado definitivamente (sin contenido)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /roles:
     get:
       tags: [Roles]
@@ -915,6 +939,28 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /cobradores/{id}/definitivo:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    delete:
+      tags: [Cobradores]
+      operationId: deleteCobradorDefinitivo
+      summary: Eliminar cobrador definitivamente (hard delete)
+      description: 'Requiere permiso: cobradores.eliminar_definitivo. Elimina el cobrador de forma permanente. Rechaza con 409 si tiene pagos reportados.'
+      responses:
+        '204':
+          description: Cobrador eliminado definitivamente (sin contenido)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
 

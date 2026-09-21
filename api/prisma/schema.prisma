@@ -379,7 +379,7 @@ model Auditoria {
   usuarioId    Int?     @map("usuario_id")
   entidad      String   @db.VarChar(80)
   entidadId    Int?     @map("entidad_id")
-  accion       String   @db.VarChar(60) // crear | editar | validar | rechazar | borrar | importar | login
+  accion       String   @db.VarChar(60) // crear | editar | validar | rechazar | borrar | borrar_definitivo | importar | login
   datosAntes   Json?    @map("datos_antes")
   datosDespues Json?    @map("datos_despues")
   ip           String?  @db.VarChar(60)

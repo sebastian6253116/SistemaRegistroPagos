@@ -29,3 +29,7 @@ export async function actualizarUsuario(id: number, input: Partial<UsuarioInput>
 export async function desactivarUsuario(id: number): Promise<void> {
   await api.delete(`/usuarios/${id}`);
 }
+
+export async function eliminarUsuarioDefinitivo(id: number): Promise<void> {
+  await api.delete(`/usuarios/${id}/definitivo`);
+}
