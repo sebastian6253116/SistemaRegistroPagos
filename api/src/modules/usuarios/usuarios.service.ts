@@ -239,10 +239,14 @@ export async function removeDefinitivo(id: number, actor: Actor): Promise<void> 
     // ON DELETE SET NULL, so its rows stay with a cleared actor), which is why it
     // is NOT a blocker. `refresh_tokens`, `password_resets` and `notificaciones`
     // are CASCADE and go away with the user. `pagos_reportados.validado_por` is
-    // SET NULL and is normally unreachable because `pagosValidados` is refused
-    // above, but the counts read the transaction snapshot while the delete below
-    // re-checks the FK against the latest committed rows: a concurrent validation
-    // can still make it reachable, and the P2003 branch turns that into a 409.
+    // SET NULL as well, so it never raises a foreign key error: `pagosValidados`
+    // is a blocker for policy reasons (it protects "who validated this payment"),
+    // not because the database would refuse the delete.
+    //
+    // The counts above read the transaction snapshot, while the deletes below make
+    // the database re-check the RESTRICT dependencies against the latest committed
+    // rows (gastos, conciliaciones, lotes and the linked collector's payments), so
+    // a row inserted concurrently is still caught by the P2003 branch as a 409.
     try {
       if (cobradorId !== null) {
         await tx.cobrador.delete({ where: { id: cobradorId } });
