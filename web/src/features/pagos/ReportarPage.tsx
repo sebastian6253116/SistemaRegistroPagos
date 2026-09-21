@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
-import { Combobox } from '@/components/ui/combobox';
+import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingState } from '@/components/ui/spinner';
@@ -75,6 +75,32 @@ function validarEvidencia(file: File): string | null {
   if (!esPdf && !esImagen) return 'Formato no permitido. Adjunte una imagen o un PDF.';
   if (file.size > MAX_EVIDENCIA_BYTES) return 'El archivo supera el tamaño máximo de 5 MB.';
   return null;
+}
+
+/**
+ * Remembers, per user and per browser, the collector last chosen by an admin.
+ * This is a UX convenience stored client-side: it is never business data, so it
+ * lives in localStorage and degrades silently when storage is unavailable.
+ * An empty string is a valid remembered value: it means "Yo mismo".
+ */
+function ultimoCobradorKey(userId: number) {
+  return `gentioncobros:ultimoCobrador:${userId}`;
+}
+
+function leerUltimoCobrador(userId: number): string | null {
+  try {
+    return localStorage.getItem(ultimoCobradorKey(userId));
+  } catch {
+    return null;
+  }
+}
+
+function guardarUltimoCobrador(userId: number, cobradorId: string): void {
+  try {
+    localStorage.setItem(ultimoCobradorKey(userId), cobradorId);
+  } catch {
+    // Storage can be unavailable (private mode, quota). The feature just degrades.
+  }
 }
 
 function resolveCatalogDefaults(
@@ -170,11 +196,37 @@ export default function ReportarPage() {
     [catalogo.data],
   );
 
+  const cobradorOptions = useMemo<ComboboxOption[]>(
+    () => [
+      { value: '', label: 'Yo mismo' },
+      ...(cobradores.data?.data ?? []).map((c) => ({
+        value: String(c.id),
+        label: `${c.codigo} — ${c.nombre}`,
+      })),
+    ],
+    [cobradores.data],
+  );
+
   useEffect(() => {
     const defaults = resolveCatalogDefaults(catalogo.data);
     setValue('cuentaRecaudadoraId', defaults.cuentaRecaudadoraId);
     setValue('tipoPagoId', defaults.tipoPagoId);
   }, [catalogo.data, setValue]);
+
+  // Restores the last collector used by this admin, once the catalog is loaded.
+  // It runs only once per mount so a background refetch never overrides a
+  // selection the user already made. A remembered collector is ignored if it is
+  // no longer selectable (e.g. it was deactivated).
+  const restaurado = useRef(false);
+  useEffect(() => {
+    if (restaurado.current) return;
+    if (!puedeElegirCobrador || !user || !cobradores.data) return;
+    restaurado.current = true;
+    const recordado = leerUltimoCobrador(user.id);
+    if (recordado === null) return;
+    if (recordado !== '' && !cobradores.data.data.some((c) => String(c.id) === recordado)) return;
+    setValue('cobradorId', recordado);
+  }, [puedeElegirCobrador, user, cobradores.data, setValue]);
 
   const handleEvidenciaChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
@@ -219,7 +271,7 @@ export default function ReportarPage() {
         return { pago, evidenciaError: getApiErrorMessage(error) };
       }
     },
-    onSuccess: ({ evidenciaError }) => {
+    onSuccess: ({ evidenciaError }, variables) => {
       if (evidenciaError) {
         toast.toast({
           variant: 'warning',
@@ -232,6 +284,9 @@ export default function ReportarPage() {
       setEvidenciaFile(null);
       setEvidenciaError(null);
       if (evidenciaInputRef.current) evidenciaInputRef.current.value = '';
+      // The next registration starts pre-selected with the collector just used.
+      const cobradorElegido = puedeElegirCobrador ? variables.cobradorId ?? '' : '';
+      if (puedeElegirCobrador && user) guardarUltimoCobrador(user.id, cobradorElegido);
       const defaults = resolveCatalogDefaults(catalogo.data);
       reset({
         bancoOrigenId: '',
@@ -246,7 +301,7 @@ export default function ReportarPage() {
         concepto: '',
         tipoCobro: 'nuevo',
         observaciones: '',
-        cobradorId: '',
+        cobradorId: cobradorElegido,
       });
       queryClient.invalidateQueries({ queryKey: ['pagos'] });
     },
@@ -427,14 +482,25 @@ export default function ReportarPage() {
               {puedeElegirCobrador ? (
                 <div className="space-y-1.5">
                   <Label htmlFor="cobradorId">Cobrador (reportar a nombre de)</Label>
-                  <Select id="cobradorId" className="h-11" {...register('cobradorId')}>
-                    <option value="">Yo mismo</option>
-                    {cobradores.data?.data.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.codigo} — {c.nombre}
-                      </option>
-                    ))}
-                  </Select>
+                  <Controller
+                    name="cobradorId"
+                    control={control}
+                    render={({ field }) => (
+                      <Combobox
+                        id="cobradorId"
+                        value={field.value ?? ''}
+                        onChange={field.onChange}
+                        options={cobradorOptions}
+                        placeholder="Yo mismo"
+                        emptyMessage="Sin cobradores que coincidan"
+                        className="h-11 [&>button]:h-11"
+                      />
+                    )}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Use el buscador para filtrar por código o nombre. Se preselecciona el último
+                    cobrador que usó.
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-1.5">
