@@ -9,6 +9,8 @@ function filtrosDe(req: Request): ReportFilters {
   return {
     fechaDesde: q.fechaDesde,
     fechaHasta: q.fechaHasta,
+    fechaMovimientoDesde: q.fechaMovimientoDesde,
+    fechaMovimientoHasta: q.fechaMovimientoHasta,
     cobradorId: q.cobradorId,
     bancoId: q.bancoId,
     estado: q.estado,
@@ -84,6 +86,11 @@ function subtitulo(f: ReportFilters): string {
   partes.push(
     `Periodo: ${f.fechaDesde ?? 'inicio'} a ${f.fechaHasta ?? 'hoy'}`,
   );
+  if (f.fechaMovimientoDesde || f.fechaMovimientoHasta) {
+    partes.push(
+      `Movimiento: ${f.fechaMovimientoDesde ?? 'inicio'} a ${f.fechaMovimientoHasta ?? 'hoy'}`,
+    );
+  }
   if (f.cobradorId) partes.push(`Cobrador: ${f.cobradorId}`);
   if (f.bancoId) partes.push(`Banco: ${f.bancoId}`);
   if (f.estado) partes.push(`Estado: ${f.estado}`);
@@ -97,12 +104,14 @@ export const exportar = asyncHandler(async (req: Request, res: Response) => {
   const filtros: ReportFilters = {
     fechaDesde: q.fechaDesde,
     fechaHasta: q.fechaHasta,
+    fechaMovimientoDesde: q.fechaMovimientoDesde,
+    fechaMovimientoHasta: q.fechaMovimientoHasta,
     cobradorId: q.cobradorId,
     bancoId: q.bancoId,
     estado: q.estado,
   };
 
-  const reporte = await service.datosParaExport(tipo, filtros);
+  const reporte = await service.datosParaExport(tipo, filtros, puedeVerAlertaAntiguedad(req));
 
   if (q.formato === 'pdf') {
     const doc = service.generarPdf(reporte.titulo, subtitulo(filtros), reporte.bloques);

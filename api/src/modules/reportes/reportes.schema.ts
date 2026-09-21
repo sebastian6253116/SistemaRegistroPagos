@@ -9,6 +9,9 @@ const estadoPago = z.enum(['pendiente', 'validado', 'rechazado', 'duplicado']);
 const filtros = {
   fechaDesde: fechaISO.optional(),
   fechaHasta: fechaISO.optional(),
+  // Date range for the LINKED bank movement's execution date (`fechaEjecucion`).
+  fechaMovimientoDesde: fechaISO.optional(),
+  fechaMovimientoHasta: fechaISO.optional(),
   cobradorId: z.coerce.number().int().positive().optional(),
   bancoId: z.coerce.number().int().positive().optional(),
   estado: estadoPago.optional(),

@@ -138,6 +138,7 @@ function CobrosTab({ filtros, onPageChange }: ReportTabProps) {
   const columns = useMemo<ColumnDef<NonNullable<typeof q.data>['data'][number], unknown>[]>(
     () => [
       { accessorKey: 'fechaPago', header: 'Fecha', cell: ({ row }) => formatDate(row.original.fechaPago) },
+      { accessorKey: 'fechaMovimiento', header: 'Fecha movimiento', cell: ({ row }) => formatDate(row.original.fechaMovimiento) },
       { accessorKey: 'referencia', header: 'Referencia' },
       { id: 'cobrador', header: 'Cobrador', cell: ({ row }) => row.original.cobrador.nombre },
       { id: 'banco', header: 'Banco', cell: ({ row }) => row.original.cuentaRecaudadora.banco.nombre },
@@ -176,6 +177,10 @@ function CobrosTab({ filtros, onPageChange }: ReportTabProps) {
               <EstadoBadge estado={row.estado} />
             </div>
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+              <div className="col-span-2">
+                <dt className="text-muted-foreground">Fecha movimiento</dt>
+                <dd className="tabular-nums">{formatDate(row.fechaMovimiento)}</dd>
+              </div>
               <div className="col-span-2">
                 <dt className="text-muted-foreground">Cobrador</dt>
                 <dd className="truncate">{row.cobrador.nombre}</dd>
@@ -812,6 +817,8 @@ export default function ReportesPage() {
   const [tab, setTab] = useState<TipoReporte>('cobros');
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
+  const [fechaMovimientoDesde, setFechaMovimientoDesde] = useState('');
+  const [fechaMovimientoHasta, setFechaMovimientoHasta] = useState('');
   const [cobradorId, setCobradorId] = useState('');
   const [bancoId, setBancoId] = useState('');
   const [estado, setEstado] = useState('');
@@ -820,7 +827,16 @@ export default function ReportesPage() {
   // Reset to the first page whenever the filters (or the active report) change.
   useEffect(() => {
     setPage(1);
-  }, [fechaDesde, fechaHasta, cobradorId, bancoId, estado, tab]);
+  }, [
+    fechaDesde,
+    fechaHasta,
+    fechaMovimientoDesde,
+    fechaMovimientoHasta,
+    cobradorId,
+    bancoId,
+    estado,
+    tab,
+  ]);
 
   const cobradores = useQuery({
     queryKey: queryKeys.cobradores({ pageSize: 200, activo: true }),
@@ -841,13 +857,24 @@ export default function ReportesPage() {
     () => ({
       fechaDesde: fechaDesde || undefined,
       fechaHasta: fechaHasta || undefined,
+      fechaMovimientoDesde: fechaMovimientoDesde || undefined,
+      fechaMovimientoHasta: fechaMovimientoHasta || undefined,
       cobradorId: cobradorId ? Number(cobradorId) : undefined,
       bancoId: bancoId ? Number(bancoId) : undefined,
       estado: estado || undefined,
       page,
       pageSize: REPORT_PAGE_SIZE,
     }),
-    [fechaDesde, fechaHasta, cobradorId, bancoId, estado, page],
+    [
+      fechaDesde,
+      fechaHasta,
+      fechaMovimientoDesde,
+      fechaMovimientoHasta,
+      cobradorId,
+      bancoId,
+      estado,
+      page,
+    ],
   );
 
   const renderTab = () => {
@@ -891,6 +918,31 @@ export default function ReportesPage() {
           <Label htmlFor="r-hasta">Hasta</Label>
           <Input id="r-hasta" type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} />
         </div>
+        {/* The bank-movement date filter is supported only by the `cobros`
+            report, so it is shown only while that tab is active. A value set
+            there stays stored but is inert for the other reports. */}
+        {tab === 'cobros' && (
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor="r-mov-desde">Movimiento desde</Label>
+              <Input
+                id="r-mov-desde"
+                type="date"
+                value={fechaMovimientoDesde}
+                onChange={(e) => setFechaMovimientoDesde(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="r-mov-hasta">Movimiento hasta</Label>
+              <Input
+                id="r-mov-hasta"
+                type="date"
+                value={fechaMovimientoHasta}
+                onChange={(e) => setFechaMovimientoHasta(e.target.value)}
+              />
+            </div>
+          </>
+        )}
         <div className="space-y-1.5">
           <Label htmlFor="r-cobrador">Cobrador</Label>
           <Select id="r-cobrador" value={cobradorId} onChange={(e) => setCobradorId(e.target.value)}>
@@ -925,11 +977,29 @@ export default function ReportesPage() {
         </div>
         <div className="flex items-end">
           <ClearFiltersButton
-            current={{ fechaDesde, fechaHasta, cobradorId, bancoId, estado }}
-            initial={{ fechaDesde: '', fechaHasta: '', cobradorId: '', bancoId: '', estado: '' }}
+            current={{
+              fechaDesde,
+              fechaHasta,
+              fechaMovimientoDesde,
+              fechaMovimientoHasta,
+              cobradorId,
+              bancoId,
+              estado,
+            }}
+            initial={{
+              fechaDesde: '',
+              fechaHasta: '',
+              fechaMovimientoDesde: '',
+              fechaMovimientoHasta: '',
+              cobradorId: '',
+              bancoId: '',
+              estado: '',
+            }}
             onClear={() => {
               setFechaDesde('');
               setFechaHasta('');
+              setFechaMovimientoDesde('');
+              setFechaMovimientoHasta('');
               setCobradorId('');
               setBancoId('');
               setEstado('');

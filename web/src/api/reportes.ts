@@ -15,6 +15,8 @@ import type {
 export interface ReporteFiltros {
   fechaDesde?: string;
   fechaHasta?: string;
+  fechaMovimientoDesde?: string;
+  fechaMovimientoHasta?: string;
   cobradorId?: number;
   bancoId?: number;
   estado?: string;

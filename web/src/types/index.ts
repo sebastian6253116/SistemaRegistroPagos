@@ -110,6 +110,9 @@ export interface TipoPagoInput {
 export interface PagoReportado {
   id: number;
   fechaPago: string;
+  // Fecha de ejecución del movimiento bancario vinculado (additive). `null`
+  // cuando el pago no tiene movimiento; solo lo emiten los reportes.
+  fechaMovimiento?: string | null;
   referencia: string;
   montoBs: string;
   montoUsd: string;

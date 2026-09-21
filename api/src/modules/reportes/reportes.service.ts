@@ -12,6 +12,9 @@ import type { EstadoPagoFiltro, TipoReporte } from './reportes.schema';
 export interface ReportFilters {
   fechaDesde?: string;
   fechaHasta?: string;
+  // Date range for the linked bank movement's `fechaEjecucion`.
+  fechaMovimientoDesde?: string;
+  fechaMovimientoHasta?: string;
   cobradorId?: number;
   bancoId?: number;
   estado?: EstadoPagoFiltro;
@@ -57,7 +60,19 @@ const JOIN_PAGOS = Prisma.sql`
   INNER JOIN bancos b ON b.id = cr.banco_id
 `;
 
-function wherePagosSql(f: ReportFilters, estadoForzado?: string): Prisma.Sql {
+/**
+ * Builds the payment WHERE clause for the raw-SQL reports.
+ *
+ * `opciones.conFechaMovimiento` is OPT-IN and defaults to `false`: the bank
+ * movement date range is supported ONLY by the `cobros` report (payments list),
+ * so every other SQL report keeps its previous behaviour. While that opt-in
+ * filter is active, a payment with NO linked movement is EXCLUDED.
+ */
+function wherePagosSql(
+  f: ReportFilters,
+  estadoForzado?: string,
+  opciones?: { conFechaMovimiento?: boolean },
+): Prisma.Sql {
   const conds: Prisma.Sql[] = [];
   const estado = estadoForzado ?? f.estado;
   if (estado) conds.push(Prisma.sql`p.estado = ${estado}`);
@@ -65,6 +80,21 @@ function wherePagosSql(f: ReportFilters, estadoForzado?: string): Prisma.Sql {
   if (f.fechaHasta) conds.push(Prisma.sql`p.fecha_pago < ${finDiaUTC(f.fechaHasta)!}`);
   if (f.cobradorId) conds.push(Prisma.sql`p.cobrador_id = ${f.cobradorId}`);
   if (f.bancoId) conds.push(Prisma.sql`cr.banco_id = ${f.bancoId}`);
+  // Opt-in bank-movement date range. When active, a payment with NO linked
+  // movement is EXCLUDED: a date filter on a relation must not silently keep
+  // rows that have no such date.
+  if (opciones?.conFechaMovimiento && (f.fechaMovimientoDesde || f.fechaMovimientoHasta)) {
+    const movConds: Prisma.Sql[] = [Prisma.sql`mb.id = p.movimiento_banco_id`];
+    if (f.fechaMovimientoDesde) {
+      movConds.push(Prisma.sql`mb.fecha_ejecucion >= ${inicioDiaUTC(f.fechaMovimientoDesde)!}`);
+    }
+    if (f.fechaMovimientoHasta) {
+      movConds.push(Prisma.sql`mb.fecha_ejecucion < ${finDiaUTC(f.fechaMovimientoHasta)!}`);
+    }
+    conds.push(
+      Prisma.sql`EXISTS (SELECT 1 FROM movimientos_banco mb WHERE ${Prisma.join(movConds, ' AND ')})`,
+    );
+  }
   if (conds.length === 0) conds.push(Prisma.sql`1 = 1`);
   return Prisma.sql`${Prisma.join(conds, ' AND ')}`;
 }
@@ -90,7 +120,16 @@ function whereGastosPrisma(f: ReportFilters): Prisma.GastoWhereInput {
   return where;
 }
 
-function wherePagosPrisma(f: ReportFilters): Prisma.PagoReportadoWhereInput {
+/**
+ * Builds the Prisma WHERE for payment reports. `opciones.conFechaMovimiento` is
+ * OPT-IN and defaults to `false`: only the `cobros` report supports the bank
+ * movement date range, so every other caller keeps its previous behaviour.
+ * While active, a payment with NO linked movement is EXCLUDED.
+ */
+function wherePagosPrisma(
+  f: ReportFilters,
+  opciones?: { conFechaMovimiento?: boolean },
+): Prisma.PagoReportadoWhereInput {
   const where: Prisma.PagoReportadoWhereInput = {};
   const desde = inicioDiaUTC(f.fechaDesde);
   const hasta = finDiaUTC(f.fechaHasta);
@@ -103,6 +142,19 @@ function wherePagosPrisma(f: ReportFilters): Prisma.PagoReportadoWhereInput {
   if (f.cobradorId) where.cobradorId = f.cobradorId;
   if (f.bancoId) where.cuentaRecaudadora = { bancoId: f.bancoId };
   if (f.estado) where.estado = f.estado;
+  // Opt-in bank-movement date range (relation). When active, payments with NO
+  // linked movement are EXCLUDED: a date filter on a relation must not silently
+  // keep rows that have no such date.
+  if (opciones?.conFechaMovimiento) {
+    const movDesde = inicioDiaUTC(f.fechaMovimientoDesde);
+    const movHasta = finDiaUTC(f.fechaMovimientoHasta);
+    if (movDesde || movHasta) {
+      const fechaEjecucion: Prisma.DateTimeFilter = {};
+      if (movDesde) fechaEjecucion.gte = movDesde;
+      if (movHasta) fechaEjecucion.lt = movHasta;
+      where.movimientoBanco = { fechaEjecucion };
+    }
+  }
   return where;
 }
 
@@ -161,6 +213,9 @@ function serializarPago(
     tasa: row.tasa.toString(),
     cobrador: row.cobrador,
     cuentaRecaudadora: row.cuentaRecaudadora,
+    // Linked bank movement date (additive). `null` when the payment has no
+    // linked movement. Emitted like `fechaPago` (raw Date; JSON serializes it).
+    fechaMovimiento: row.movimientoBanco?.fechaEjecucion ?? null,
     // Always present so the response shape stays stable; `null` when the caller
     // lacks `pagos.ver_alerta_antiguedad` (server-side boundary).
     alertaAntiguedadDias: puedeVerAlertaAntiguedad
@@ -182,7 +237,8 @@ export async function cobros(
   params: PaginationParams,
   puedeVerAlertaAntiguedad = false,
 ) {
-  const where = wherePagosPrisma(f);
+  // Only this report opts into the bank-movement date filter.
+  const where = wherePagosPrisma(f, { conFechaMovimiento: true });
   const [rows, total, agg, config] = await Promise.all([
     prisma.pagoReportado.findMany({
       where,
@@ -875,14 +931,19 @@ const TITULOS: Record<TipoReporte, string> = {
 /**
  * Builds the export payload by REUSING the same query functions that back the
  * JSON endpoints; only the pagination window changes (all rows).
+ *
+ * `puedeVerAlertaAntiguedad` is threaded into the pago-backed blocks so an
+ * authorized user's export carries the alert and an unauthorized user's does
+ * not, exactly like the JSON endpoints (server-side gate at the controller).
  */
 export async function datosParaExport(
   tipo: TipoReporte,
   f: ReportFilters,
+  puedeVerAlertaAntiguedad = false,
 ): Promise<ReporteExportable> {
   switch (tipo) {
     case 'cobros': {
-      const r = await cobros(f, SIN_LIMITE);
+      const r = await cobros(f, SIN_LIMITE, puedeVerAlertaAntiguedad);
       return {
         titulo: TITULOS[tipo],
         bloques: [
@@ -890,12 +951,14 @@ export async function datosParaExport(
             nombre: 'Cobros',
             columnas: [
               { key: 'fechaPago', label: 'Fecha' },
+              { key: 'fechaMovimiento', label: 'Fecha movimiento' },
               { key: 'referencia', label: 'Referencia' },
               { key: 'cobradorNombre', label: 'Cobrador' },
               { key: 'banco', label: 'Banco' },
               { key: 'montoBs', label: 'Monto Bs', align: 'right' },
               { key: 'montoUsd', label: 'Monto USD', align: 'right' },
               { key: 'tasa', label: 'Tasa', align: 'right' },
+              { key: 'alertaAntiguedad', label: 'Alerta antigüedad' },
               { key: 'estado', label: 'Estado' },
               { key: 'tipoCobro', label: 'Tipo' },
             ],
@@ -903,6 +966,8 @@ export async function datosParaExport(
               ...row,
               cobradorNombre: row.cobrador?.nombre ?? '',
               banco: row.cuentaRecaudadora?.banco?.nombre ?? '',
+              alertaAntiguedad:
+                row.alertaAntiguedadDias != null ? `${row.alertaAntiguedadDias} días` : '',
             })),
           },
         ],
@@ -1042,7 +1107,7 @@ export async function datosParaExport(
       };
     }
     case 'pagos-sin-respaldo': {
-      const r = await pagosSinRespaldo(f, SIN_LIMITE);
+      const r = await pagosSinRespaldo(f, SIN_LIMITE, puedeVerAlertaAntiguedad);
       return {
         titulo: TITULOS[tipo],
         bloques: [
