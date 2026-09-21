@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { paginate, type PaginationParams } from '../../lib/http';
 import { desviacionPorcentual, tasaPromedioPonderada } from '../../lib/money';
-import { alertaAntiguedadDocumento } from '../../lib/classification';
+import { alertaAntiguedadDocumento, antiguedadEnDias, esPagoViejo } from '../../lib/classification';
 import { getConfigValues } from '../../lib/config-values';
 import { prisma } from '../../lib/prisma';
 import * as gastosService from '../gastos/gastos.service';
@@ -260,6 +260,23 @@ function serializarPago(
   };
 }
 
+/**
+ * "Antigüedad" fields, computed ON THE FLY for the `cobros` report only.
+ *
+ * Kept OUT of `serializarPago` on purpose: that serializer is shared with
+ * `pagos-sin-respaldo`, which must not gain columns. The age is counted from
+ * `fechaPago` to TODAY in UTC and the "viejo" flag uses the SAME threshold as
+ * the old-document alert (`cobro.umbral_antiguedad_dias`), resolved ONCE per
+ * request by the caller.
+ */
+function camposAntiguedad(fechaPago: Date, umbralAntiguedadDias: number, hoyUTC: Date) {
+  const antiguedadDias = antiguedadEnDias(fechaPago, hoyUTC);
+  return {
+    antiguedadDias,
+    esViejo: esPagoViejo(antiguedadDias, umbralAntiguedadDias),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 1. Cobros por periodo (detalle + consolidado)
 // ---------------------------------------------------------------------------
@@ -271,6 +288,8 @@ export async function cobros(
 ) {
   // Only this report opts into the bank-movement date and the age filters.
   const where = wherePagosPrisma(f, { conFechaMovimiento: true, conAntiguedad: true });
+  // Resolved ONCE per request and reused for every row.
+  const hoyUTC = inicioHoyUTC();
   const [rows, total, agg, config] = await Promise.all([
     prisma.pagoReportado.findMany({
       where,
@@ -290,7 +309,10 @@ export async function cobros(
 
   return {
     ...paginate(
-      rows.map((r) => serializarPago(r, config.umbralAntiguedadDias, puedeVerAlertaAntiguedad)),
+      rows.map((r) => ({
+        ...serializarPago(r, config.umbralAntiguedadDias, puedeVerAlertaAntiguedad),
+        ...camposAntiguedad(r.fechaPago, config.umbralAntiguedadDias, hoyUTC),
+      })),
       total,
       params,
     ),
@@ -991,6 +1013,8 @@ export async function datosParaExport(
               { key: 'montoUsd', label: 'Monto USD', align: 'right' },
               { key: 'tasa', label: 'Tasa', align: 'right' },
               { key: 'alertaAntiguedad', label: 'Alerta antigüedad' },
+              { key: 'antiguedad', label: 'Antigüedad' },
+              { key: 'viejo', label: 'Viejo' },
               { key: 'estado', label: 'Estado' },
               { key: 'tipoCobro', label: 'Tipo' },
             ],
@@ -1000,6 +1024,8 @@ export async function datosParaExport(
               banco: row.cuentaRecaudadora?.banco?.nombre ?? '',
               alertaAntiguedad:
                 row.alertaAntiguedadDias != null ? `${row.alertaAntiguedadDias} días` : '',
+              antiguedad: `${row.antiguedadDias} días`,
+              viejo: row.esViejo ? 'Sí' : '',
             })),
           },
         ],

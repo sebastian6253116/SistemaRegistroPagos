@@ -46,6 +46,28 @@ export function alertaAntiguedadDocumento(
 }
 
 /**
+ * Whole-day age of a payment, counted from TODAY in UTC.
+ *
+ * `fechaPago` is a DATE column (UTC midnight), so `hoyUTC` is the matching UTC
+ * midnight and the gap is a whole number of 24h days, floored. A payment dated
+ * today is `0`; a future-dated payment yields a NEGATIVE value, kept signed on
+ * purpose (callers must not clamp it).
+ */
+export function antiguedadEnDias(fechaPago: Date, hoyUTC: Date): number {
+  return Math.floor((hoyUTC.getTime() - fechaPago.getTime()) / 86_400_000);
+}
+
+/**
+ * True when a payment is "viejo" against the configured threshold
+ * (`cobro.umbral_antiguedad_dias`). Same STRICT "greater than" style as
+ * `alertaAntiguedadDocumento` and `clasificarPorAntiguedad`: exactly at the
+ * threshold is NOT old, and a negative age is never old.
+ */
+export function esPagoViejo(antiguedadDias: number, umbralDias: number): boolean {
+  return antiguedadDias > umbralDias;
+}
+
+/**
  * Compares the collector's mark with the derived classification.
  * Never overwrites the collector's value; only flags the mismatch.
  */

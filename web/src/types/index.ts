@@ -152,6 +152,12 @@ export interface PagoReportado {
   // fecha de ejecución del movimiento bancario conciliado, cuando supera el
   // umbral configurado (`cobro.umbral_antiguedad_dias`). `null` si no aplica.
   alertaAntiguedadDias: number | null;
+  // Antigüedad del pago en días desde `fechaPago` hasta hoy (UTC). Solo lo emite
+  // el reporte `cobros`. Firmada: un pago con fecha futura da negativo.
+  antiguedadDias?: number;
+  // Marca "viejo" contra el mismo umbral configurado (estricto: igual al umbral
+  // NO es viejo). Solo lo emite el reporte `cobros`.
+  esViejo?: boolean;
   validador: { id: number; nombreCompleto: string } | null;
 }
 

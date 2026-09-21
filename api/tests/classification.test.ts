@@ -2,7 +2,9 @@ import { TipoCobro } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 import {
   alertaAntiguedadDocumento,
+  antiguedadEnDias,
   clasificarPorAntiguedad,
+  esPagoViejo,
   requiereRevision,
 } from '../src/lib/classification';
 
@@ -75,5 +77,41 @@ describe('alertaAntiguedadDocumento (old document vs. bank movement)', () => {
   it('does not flag a movement on or before the payment date', () => {
     const pago = new Date('2026-09-01T00:00:00.000Z');
     expect(alertaAntiguedadDocumento(pago, new Date('2026-08-20T00:00:00.000Z'), umbral)).toBeNull();
+  });
+});
+
+describe('antiguedadEnDias (días desde fechaPago hasta hoy, UTC)', () => {
+  const hoy = new Date('2026-09-21T00:00:00.000Z');
+
+  it('counts the whole days elapsed', () => {
+    expect(antiguedadEnDias(new Date('2026-09-11T00:00:00.000Z'), hoy)).toBe(10);
+  });
+
+  it('returns 0 for a payment dated today', () => {
+    expect(antiguedadEnDias(new Date('2026-09-21T00:00:00.000Z'), hoy)).toBe(0);
+  });
+
+  it('returns a negative value for a future-dated payment (kept signed)', () => {
+    expect(antiguedadEnDias(new Date('2026-09-24T00:00:00.000Z'), hoy)).toBe(-3);
+  });
+});
+
+describe('esPagoViejo (strict threshold)', () => {
+  const umbral = 30;
+
+  it('does not flag an age below the threshold', () => {
+    expect(esPagoViejo(29, umbral)).toBe(false);
+  });
+
+  it('does not flag an age exactly at the threshold', () => {
+    expect(esPagoViejo(30, umbral)).toBe(false);
+  });
+
+  it('flags an age above the threshold', () => {
+    expect(esPagoViejo(31, umbral)).toBe(true);
+  });
+
+  it('never flags a negative age', () => {
+    expect(esPagoViejo(-1, umbral)).toBe(false);
   });
 });

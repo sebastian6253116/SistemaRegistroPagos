@@ -145,7 +145,9 @@ function CobrosTab({ filtros, onPageChange }: ReportTabProps) {
       { accessorKey: 'montoBs', header: 'Monto Bs', cell: ({ row }) => formatMoney(row.original.montoBs) },
       { accessorKey: 'montoUsd', header: 'Monto USD', cell: ({ row }) => formatMoney(row.original.montoUsd) },
       { accessorKey: 'tasa', header: 'Tasa', cell: ({ row }) => formatRate(row.original.tasa) },
-      { id: 'alerta-antiguedad', header: 'Antigüedad', cell: ({ row }) => (puedeVerAlerta ? <AlertaAntiguedadBadge dias={row.original.alertaAntiguedadDias} /> : null) },
+      { accessorKey: 'antiguedadDias', header: 'Antigüedad', cell: ({ row }) => `${row.original.antiguedadDias ?? 0} días` },
+      { id: 'es-viejo', header: 'Viejo', cell: ({ row }) => (row.original.esViejo ? <Badge variant="warning">Viejo</Badge> : <span className="text-muted-foreground">—</span>) },
+      { id: 'alerta-antiguedad', header: 'Alerta antigüedad', cell: ({ row }) => (puedeVerAlerta ? <AlertaAntiguedadBadge dias={row.original.alertaAntiguedadDias} /> : null) },
       { accessorKey: 'estado', header: 'Estado' },
     ],
     [puedeVerAlerta],
@@ -200,6 +202,14 @@ function CobrosTab({ filtros, onPageChange }: ReportTabProps) {
               <div>
                 <dt className="text-muted-foreground">Tasa</dt>
                 <dd className="tabular-nums text-muted-foreground">{formatRate(row.tasa)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Antigüedad</dt>
+                <dd className="tabular-nums">{row.antiguedadDias ?? 0} días</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Viejo</dt>
+                <dd>{row.esViejo ? <Badge variant="warning">Viejo</Badge> : <span className="text-muted-foreground">—</span>}</dd>
               </div>
             </dl>
             {puedeVerAlerta && <AlertaAntiguedadBadge dias={row.alertaAntiguedadDias} />}
