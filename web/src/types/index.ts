@@ -487,6 +487,7 @@ export interface ReporteMovimientos {
     lote: { id: number; nombreArchivo: string } | null;
   }[];
   meta: Paginated<unknown>['meta'];
+  totales: { cantidad: number; totalBs: string };
 }
 
 export interface Notificacion {

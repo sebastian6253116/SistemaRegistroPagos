@@ -531,6 +531,14 @@ function MovimientosNoConciliadosTab({ filtros, onPageChange }: ReportTabProps) 
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   return (
     <TablaWrapper filtros={filtros} tipo="movimientos-no-conciliados">
+      {q.data && (
+        <ResumenCard
+          items={[
+            { label: 'Total no conciliado (Bs)', value: formatMoney(q.data.totales.totalBs) },
+            { label: 'No conciliados', value: formatNumber(q.data.totales.cantidad) },
+          ]}
+        />
+      )}
       <DataTable
         columns={columns}
         data={q.data?.data ?? []}
@@ -811,10 +819,14 @@ export default function ReportesPage() {
   }, [fechaDesde, fechaHasta, cobradorId, bancoId, estado, tab]);
 
   const cobradores = useQuery({
-    queryKey: queryKeys.cobradores({ pageSize: 200 }),
-    queryFn: () => listarCobradores({ pageSize: 200 }),
+    queryKey: queryKeys.cobradores({ pageSize: 200, activo: true }),
+    queryFn: () => listarCobradores({ pageSize: 200, activo: true }),
     staleTime: STALE_CATALOGS,
   });
+  const cobradoresConNombre = useMemo(
+    () => (cobradores.data?.data ?? []).filter((c) => c.nombre.trim() !== ''),
+    [cobradores.data],
+  );
   const catalogos = useQuery({
     queryKey: queryKeys.catalogoFormPago(),
     queryFn: getCatalogoFormPago,
@@ -879,7 +891,7 @@ export default function ReportesPage() {
           <Label htmlFor="r-cobrador">Cobrador</Label>
           <Select id="r-cobrador" value={cobradorId} onChange={(e) => setCobradorId(e.target.value)}>
             <option value="">Todos</option>
-            {cobradores.data?.data.map((c) => (
+            {cobradoresConNombre.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.nombre}
               </option>

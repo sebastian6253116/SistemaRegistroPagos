@@ -562,7 +562,7 @@ export async function movimientosNoConciliados(f: ReportFilters, params: Paginat
   }
   if (f.bancoId) where.cuentaRecaudadora = { bancoId: f.bancoId };
 
-  const [rows, total] = await Promise.all([
+  const [rows, agg] = await Promise.all([
     prisma.movimientoBanco.findMany({
       where,
       select: movimientoSelect,
@@ -570,7 +570,11 @@ export async function movimientosNoConciliados(f: ReportFilters, params: Paginat
       skip: params.skip,
       take: params.take,
     }),
-    prisma.movimientoBanco.count({ where }),
+    prisma.movimientoBanco.aggregate({
+      where,
+      _count: { _all: true },
+      _sum: { montoBs: true },
+    }),
   ]);
 
   const data = (rows as MovimientoDetalle[]).map((r) => ({
@@ -578,7 +582,13 @@ export async function movimientosNoConciliados(f: ReportFilters, params: Paginat
     montoBs: r.montoBs.toString(),
   }));
 
-  return paginate(data, total, params);
+  return {
+    ...paginate(data, agg._count._all, params),
+    totales: {
+      cantidad: agg._count._all,
+      totalBs: money(agg._sum.montoBs),
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

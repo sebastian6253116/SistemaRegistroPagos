@@ -3786,7 +3786,7 @@ paths:
       tags: [Reportes]
       operationId: reporteMovimientosNoConciliados
       summary: Reporte de movimientos no conciliados
-      description: 'Requiere permiso: reportes.ver.'
+      description: 'Requiere permiso: reportes.ver. Incluye un objeto `totales` (cantidad y suma de montos en Bs) que respeta los filtros de fecha y banco activos.'
       parameters:
         - $ref: '#/components/parameters/PageQuery'
         - $ref: '#/components/parameters/PageSizeQuery'
@@ -3797,11 +3797,19 @@ paths:
         - $ref: '#/components/parameters/EstadoQuery'
       responses:
         '200':
-          description: Reporte paginado de movimientos no conciliados
+          description: Reporte paginado de movimientos no conciliados + totales
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Paginated'
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      totales:
+                        type: object
+                        properties:
+                          cantidad: { type: integer, example: 42 }
+                          totalBs: { type: string, example: '12345.00' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
