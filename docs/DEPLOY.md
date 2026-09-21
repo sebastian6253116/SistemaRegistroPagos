@@ -1,7 +1,12 @@
 # Despliegue en producción con Dokploy
 
-Este documento describe cómo desplegar el sistema (monorepo `api/` + `web/`) en un
-VPS mediante **Dokploy** (Docker + autodeploy por `git push`).
+Este documento describe cómo desplegar el sistema (monorepo `api/` + `web/`) en
+un VPS mediante **Dokploy** (Docker + autodeploy por `git push`).
+
+El sistema se despliega como **un único servicio**: una sola imagen, un solo
+puerto interno y **un solo dominio**. El API de Express sirve la SPA de React
+ya compilada desde el **mismo origen**, así que no hay contenedor de nginx ni
+peticiones cross-origin (CORS) entre frontend y backend.
 
 La base de datos **MariaDB es externa**: no se levanta como servicio dentro del
 `docker-compose.yml`.
@@ -10,28 +15,31 @@ La base de datos **MariaDB es externa**: no se levanta como servicio dentro del
 
 | Servicio | Origen | Imagen base | Puerto interno | Notas |
 | --- | --- | --- | --- | --- |
-| `api` | `api/Dockerfile` | `node:22.17-alpine` | `4000` | Aplica migraciones al arrancar; volumen persistente para uploads |
-| `web` | `web/Dockerfile` | `nginxinc/nginx-unprivileged:1.27-alpine` | `8080` | SPA estática con fallback a `index.html` |
+| `app` | `Dockerfile` (raíz del repo) | `node:22.17-alpine` | `4000` | Sirve el API y la SPA compilada; aplica migraciones al arrancar; volumen persistente para uploads |
 
-Dokploy enruta los dominios públicos hacia esos puertos (se configuran en la UI
-de Dokploy). El compose **no publica puertos en el host**: el API sólo es
-accesible a través del proxy.
+El `Dockerfile` está en la **raíz del repositorio** y su **contexto de build es
+la raíz del repo** (`./`), porque necesita tanto `api/` como `web/`.
+
+Dokploy enruta **un único dominio público** hacia el puerto interno `4000` (se
+configura en la UI de Dokploy). El compose **no publica puertos en el host**: el
+servicio sólo es accesible a través del proxy de Dokploy.
 
 ---
 
-## 1. Variables de entorno del servicio `api`
+## 1. Variables de entorno del servicio `app`
 
-Configurar en Dokploy (Environment del servicio `api`).
+Configurar en Dokploy (Environment del servicio `app`).
 
 | Variable | ¿Obligatoria? | ¿Secreto? | Valor / ejemplo |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | **Sí** | **Sí** | `mysql://USUARIO:PASSWORD@HOST_EXTERNO:3306/NOMBRE_BASE` |
 | `JWT_ACCESS_SECRET` | **Sí** | **Sí** | Cadena aleatoria larga (mín. 32 bytes) |
 | `JWT_REFRESH_SECRET` | **Sí** | **Sí** | Cadena aleatoria larga, **distinta** de la anterior |
-| `CORS_ORIGIN` | **Sí** | No | URL pública del `web` (ver sección 3) |
 | `NODE_ENV` | Recomendada | No | `production` |
-| `PORT` | Recomendada | No | `4000` (debe coincidir con el puerto interno) |
+| `PORT` | Recomendada | No | `4000` (debe coincidir con el puerto interno y con el dominio de Dokploy) |
+| `WEB_DIST_DIR` | Recomendada | No | `/app/web/dist` (ruta de la SPA compilada dentro de la imagen; ya viene fijada en el `Dockerfile` y el compose) |
 | `UPLOAD_DIR` | Recomendada | No | `uploads` (**no cambiar**: debe coincidir con el volumen) |
+| `CORS_ORIGIN` | No | No | Déjala vacía o con el dominio público. **Ya no es crítica**: la SPA llama al mismo origen y no dispara CORS. Sólo aplica a clientes externos que llamen al API cross-origin |
 | `JWT_ACCESS_TTL` | No | No | `15m` |
 | `JWT_REFRESH_TTL` | No | No | `7d` |
 | `MAX_LOGIN_ATTEMPTS` | No | No | `5` |
@@ -41,50 +49,53 @@ Configurar en Dokploy (Environment del servicio `api`).
 > Si falta `DATABASE_URL`, `JWT_ACCESS_SECRET` o `JWT_REFRESH_SECRET`, el API
 > **aborta el arranque** (`api/src/config/env.ts`).
 
----
+### Ya NO se necesita `VITE_API_URL`
 
-## 2. Variables de build del servicio `web`
+En el despliegue anterior (dos servicios) el frontend se compilaba con un
+`VITE_API_URL` como *build arg* apuntando a la URL pública del API. Eso ya no
+existe:
 
-| Variable | ¿Obligatoria? | ¿Secreto? | Valor / ejemplo |
-| --- | --- | --- | --- |
-| `VITE_API_URL` | **Sí** (build arg) | No | `https://api.cobros.example.com/api` |
-
-**Muy importante:** Vite inyecta `import.meta.env.VITE_API_URL` en el bundle
-durante el **build** (`web/src/api/client.ts`). Si no se pasa, el código cae al
-fallback `http://localhost:4000/api` y la web desplegada llamaría a `localhost`.
-Por eso el `web/Dockerfile` **falla a propósito** si `VITE_API_URL` viene vacío.
-
-Debe incluir el sufijo `/api`.
+- La SPA se compila con `VITE_API_URL=/api`, una ruta **relativa**.
+- Al servirse desde el mismo origen, `/api` resuelve contra el mismo dominio en
+  el que está la SPA.
+- No hay ninguna URL pública *horneada* en el bundle y no hay que configurar
+  nada por entorno para el frontend.
 
 ---
 
-## 3. Consistencia de las dos URLs públicas (crítico)
+## 2. Un único origen (sin CORS)
 
-Hay dos URLs que deben apuntarse mutuamente:
+API y SPA comparten origen y puerto:
 
-1. `CORS_ORIGIN` (API) debe incluir la URL pública del **web**.
-   - Ejemplo: `CORS_ORIGIN=https://cobros.example.com`
-   - Acepta varias separadas por coma: `https://cobros.example.com,https://www.cobros.example.com`
-2. `VITE_API_URL` (web) debe apuntar a la URL pública del **API**, con `/api`.
-   - Ejemplo: `VITE_API_URL=https://api.cobros.example.com/api`
+- `GET /` y las rutas del router (por ejemplo `/pagos/12`) devuelven el
+  `index.html` de la SPA (fallback para *deep links* de react-router).
+- `GET /api/...` atiende el API REST. Un `/api/...` inexistente sigue
+  respondiendo un **404 JSON** (nunca el HTML de la SPA).
 
-Si cualquiera de las dos queda mal, el navegador bloqueará las peticiones por
-CORS o llamará a la URL equivocada.
+Como el navegador habla con el mismo dominio, no se producen peticiones
+cross-origin para la SPA; por eso `CORS_ORIGIN` deja de ser crítica.
+
+### Content Security Policy
+
+El API aplica `helmet` con una CSP explícita que permite la SPA servida desde
+el mismo origen: el *script inline* de tema de `index.html`, los assets de
+Vite, las previsualizaciones (`blob:`/`data:`) y las llamadas al propio API.
+Ver los comentarios de cada directiva en `api/src/app.ts`.
 
 ---
 
-## 4. Persistencia de archivos subidos
+## 3. Persistencia de archivos subidos
 
-Los comprobantes se guardan en disco dentro del contenedor del API
+Los comprobantes se guardan en disco dentro del contenedor
 (`UPLOAD_DIR=uploads`, es decir `/app/uploads`). El compose monta el volumen
 nombrado `gestion_cobros_api_uploads` en `/app/uploads` para que sobrevivan a
 los redeploys. No borres ese volumen.
 
 ---
 
-## 5. Migraciones de base de datos
+## 4. Migraciones de base de datos
 
-El contenedor del API las aplica automáticamente al arrancar:
+El contenedor aplica las migraciones automáticamente al arrancar:
 
 ```
 npx prisma migrate deploy && node dist/index.js
@@ -96,12 +107,12 @@ las veces que haga falta. No es necesario ningún comando manual.
 Comando manual de respaldo (una sola vez, si hiciera falta):
 
 ```
-docker compose run --rm api npx prisma migrate deploy
+docker compose run --rm app npx prisma migrate deploy
 ```
 
 ---
 
-## 6. Bootstrap del administrador (seguro)
+## 5. Bootstrap del administrador (seguro)
 
 `prisma/seed.ts` crea usuarios de **desarrollo** con contraseñas conocidas
 (`Admin123!`, etc.). **Nunca uses esas credenciales en producción.**
@@ -152,7 +163,7 @@ npm run create-admin
 Dentro del contenedor de producción (sólo hay JS compilado, no `tsx`):
 
 ```
-docker compose exec api node dist/prisma/create-admin.js
+docker compose exec app node dist/prisma/create-admin.js
 ```
 
 En ambos casos se pasan `ADMIN_EMAIL` y `ADMIN_PASSWORD` por entorno. No
@@ -160,12 +171,16 @@ escribas la contraseña en el repositorio.
 
 ---
 
-## 7. Resumen del flujo de despliegue
+## 6. Resumen del flujo de despliegue
 
 1. Crear la base MariaDB externa y un usuario con permisos sobre ella.
-2. En Dokploy: crear el stack desde el repositorio (`docker-compose.yml`).
-3. Definir las variables de entorno del `api` y el build arg `VITE_API_URL` del `web`.
-4. Configurar los dominios públicos (web → 8080, api → 4000) en Dokploy.
-5. Deploy. El API aplica migraciones y arranca; el web sirve la SPA.
+2. En Dokploy: crear la aplicación tipo Compose desde el repositorio
+   (`docker-compose.yml`). Dockerfile por defecto: `./Dockerfile`; contexto de
+   build: la raíz del repo.
+3. Definir las variables de entorno del servicio `app` (ver sección 1). No hay
+   build args de frontend.
+4. Configurar **un único dominio** público apuntando al puerto interno `4000`
+   en Dokploy.
+5. Deploy. El contenedor aplica migraciones y arranca sirviendo API + SPA.
 6. En una base nueva: `npm run seed` y luego `npm run create-admin`.
-7. Verificar `https://api.<dominio>/health` (debe responder `{"status":"ok"}`).
+7. Verificar `https://<dominio>/health` (debe responder `{"status":"ok"}`).

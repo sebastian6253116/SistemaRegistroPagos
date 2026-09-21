@@ -1,0 +1,39 @@
+# Build context is the REPO ROOT. Keep only what the image build needs:
+# api/src, api/prisma, web/src, web/public and both package*.json files.
+
+# Dependencies (reinstalled inside the image)
+**/node_modules
+
+# Build output (rebuilt inside the image; the SPA is copied via --from)
+**/dist
+**/build
+
+# Secrets - never copy into an image layer
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Uploaded user files (mounted as a volume at runtime)
+**/uploads
+
+# Logs
+**/*.log
+**/npm-debug.log*
+
+# Tests, coverage and local scratch artifacts (not needed to build or run)
+**/tests
+**/coverage
+smoke-pago-id.txt
+_tmp_*
+*.bak
+
+# VCS / CI / docs / agent tooling / compose (not part of the image)
+.git
+.gitignore
+.github
+.atl
+.codegraph
+docs
+*.md
+docker-compose.yml

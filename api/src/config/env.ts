@@ -26,6 +26,11 @@ const EnvSchema = z.object({
   UMBRAL_ANTIGUEDAD_DIAS: z.coerce.number().int().nonnegative().default(30),
 
   UPLOAD_DIR: z.string().default('uploads'),
+
+  // Directory holding the built React SPA (index.html + assets). Resolved
+  // relative to the process CWD; the default matches running from `api/` in
+  // development. In Docker it is overridden to the baked build path.
+  WEB_DIST_DIR: z.string().default('../web/dist'),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
