@@ -15,6 +15,9 @@ const filtros = {
   cobradorId: z.coerce.number().int().positive().optional(),
   bancoId: z.coerce.number().int().positive().optional(),
   estado: estadoPago.optional(),
+  // Keeps only payments younger than N whole days, counted from today in UTC.
+  // Opt-in: only the `cobros` report applies it.
+  antiguedadMaxDias: z.coerce.number().int().positive().optional(),
 };
 
 export const reporteQuerySchema = z.object({

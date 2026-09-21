@@ -18,6 +18,9 @@ export interface ReportFilters {
   cobradorId?: number;
   bancoId?: number;
   estado?: EstadoPagoFiltro;
+  // Keeps only payments younger than N whole days, counted from today in UTC.
+  // Opt-in: only the `cobros` report applies it.
+  antiguedadMaxDias?: number;
 }
 
 /** Pagination used by exports: fetch every matching row. */
@@ -36,6 +39,24 @@ function finDiaUTC(value?: string): Date | undefined {
   const d = new Date(`${value}T00:00:00.000Z`);
   d.setUTCDate(d.getUTCDate() + 1);
   return d;
+}
+
+/**
+ * Start of TODAY in UTC (00:00:00.000). `fechaPago` is a DATE column, so both
+ * sides of the "younger than N days" comparison are exact UTC midnights.
+ */
+function inicioHoyUTC(): Date {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+/**
+ * Strict lower bound for the "younger than N days" rule: a payment is kept when
+ * its whole-day age `(startOfTodayUTC - fechaPago) / 86_400_000` is < N, which
+ * is exactly `fechaPago > startOfTodayUTC - N days`.
+ */
+function limiteAntiguedadMaxDias(dias: number): Date {
+  return new Date(inicioHoyUTC().getTime() - dias * 86_400_000);
 }
 
 function money(value: unknown): string {
@@ -121,14 +142,15 @@ function whereGastosPrisma(f: ReportFilters): Prisma.GastoWhereInput {
 }
 
 /**
- * Builds the Prisma WHERE for payment reports. `opciones.conFechaMovimiento` is
- * OPT-IN and defaults to `false`: only the `cobros` report supports the bank
- * movement date range, so every other caller keeps its previous behaviour.
- * While active, a payment with NO linked movement is EXCLUDED.
+ * Builds the Prisma WHERE for payment reports. `opciones.conFechaMovimiento` and
+ * `opciones.conAntiguedad` are OPT-IN and default to `false`: only the `cobros`
+ * report supports the bank movement date range and the "younger than N days"
+ * age filter, so every other caller keeps its previous behaviour. While the
+ * movement filter is active, a payment with NO linked movement is EXCLUDED.
  */
 function wherePagosPrisma(
   f: ReportFilters,
-  opciones?: { conFechaMovimiento?: boolean },
+  opciones?: { conFechaMovimiento?: boolean; conAntiguedad?: boolean },
 ): Prisma.PagoReportadoWhereInput {
   const where: Prisma.PagoReportadoWhereInput = {};
   const desde = inicioDiaUTC(f.fechaDesde);
@@ -142,6 +164,16 @@ function wherePagosPrisma(
   if (f.cobradorId) where.cobradorId = f.cobradorId;
   if (f.bancoId) where.cuentaRecaudadora = { bancoId: f.bancoId };
   if (f.estado) where.estado = f.estado;
+  // Opt-in age filter: keep only payments whose whole-day age from today is
+  // strictly less than N (equivalent to `fechaPago > startOfTodayUTC - N days`).
+  // It composes with the Desde/Hasta range on the same `fechaPago` filter.
+  if (opciones?.conAntiguedad && f.antiguedadMaxDias) {
+    const fechaPago: Prisma.DateTimeFilter = {
+      ...(where.fechaPago as Prisma.DateTimeFilter | undefined),
+    };
+    fechaPago.gt = limiteAntiguedadMaxDias(f.antiguedadMaxDias);
+    where.fechaPago = fechaPago;
+  }
   // Opt-in bank-movement date range (relation). When active, payments with NO
   // linked movement are EXCLUDED: a date filter on a relation must not silently
   // keep rows that have no such date.
@@ -237,8 +269,8 @@ export async function cobros(
   params: PaginationParams,
   puedeVerAlertaAntiguedad = false,
 ) {
-  // Only this report opts into the bank-movement date filter.
-  const where = wherePagosPrisma(f, { conFechaMovimiento: true });
+  // Only this report opts into the bank-movement date and the age filters.
+  const where = wherePagosPrisma(f, { conFechaMovimiento: true, conAntiguedad: true });
   const [rows, total, agg, config] = await Promise.all([
     prisma.pagoReportado.findMany({
       where,

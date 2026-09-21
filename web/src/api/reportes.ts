@@ -20,6 +20,9 @@ export interface ReporteFiltros {
   cobradorId?: number;
   bancoId?: number;
   estado?: string;
+  // Keeps only payments younger than N whole days, counted from today in UTC.
+  // Applied only by the `cobros` report.
+  antiguedadMaxDias?: number;
   page?: number;
   pageSize?: number;
 }

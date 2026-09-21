@@ -822,6 +822,7 @@ export default function ReportesPage() {
   const [cobradorId, setCobradorId] = useState('');
   const [bancoId, setBancoId] = useState('');
   const [estado, setEstado] = useState('');
+  const [antiguedadMaxDias, setAntiguedadMaxDias] = useState('');
   const [page, setPage] = useState(1);
 
   // Reset to the first page whenever the filters (or the active report) change.
@@ -835,6 +836,7 @@ export default function ReportesPage() {
     cobradorId,
     bancoId,
     estado,
+    antiguedadMaxDias,
     tab,
   ]);
 
@@ -862,6 +864,11 @@ export default function ReportesPage() {
       cobradorId: cobradorId ? Number(cobradorId) : undefined,
       bancoId: bancoId ? Number(bancoId) : undefined,
       estado: estado || undefined,
+      // Only forward a positive integer: the API rejects 0, negatives and
+      // decimals, and sending them would turn the whole report into an error.
+      antiguedadMaxDias: /^\d+$/.test(antiguedadMaxDias) && Number(antiguedadMaxDias) > 0
+        ? Number(antiguedadMaxDias)
+        : undefined,
       page,
       pageSize: REPORT_PAGE_SIZE,
     }),
@@ -873,6 +880,7 @@ export default function ReportesPage() {
       cobradorId,
       bancoId,
       estado,
+      antiguedadMaxDias,
       page,
     ],
   );
@@ -941,6 +949,20 @@ export default function ReportesPage() {
                 onChange={(e) => setFechaMovimientoHasta(e.target.value)}
               />
             </div>
+            {/* Age filter: only the `cobros` report applies it, so it is shown
+                only while that tab is active, like the movement-date filter. */}
+            <div className="space-y-1.5">
+              <Label htmlFor="r-antiguedad">Antigüedad menor a (días)</Label>
+              <Input
+                id="r-antiguedad"
+                type="number"
+                min={1}
+                inputMode="numeric"
+                placeholder="Ej. 30"
+                value={antiguedadMaxDias}
+                onChange={(e) => setAntiguedadMaxDias(e.target.value)}
+              />
+            </div>
           </>
         )}
         <div className="space-y-1.5">
@@ -985,6 +1007,7 @@ export default function ReportesPage() {
               cobradorId,
               bancoId,
               estado,
+              antiguedadMaxDias,
             }}
             initial={{
               fechaDesde: '',
@@ -994,6 +1017,7 @@ export default function ReportesPage() {
               cobradorId: '',
               bancoId: '',
               estado: '',
+              antiguedadMaxDias: '',
             }}
             onClear={() => {
               setFechaDesde('');
@@ -1003,6 +1027,7 @@ export default function ReportesPage() {
               setCobradorId('');
               setBancoId('');
               setEstado('');
+              setAntiguedadMaxDias('');
             }}
           />
         </div>

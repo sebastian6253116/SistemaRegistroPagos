@@ -14,6 +14,7 @@ function filtrosDe(req: Request): ReportFilters {
     cobradorId: q.cobradorId,
     bancoId: q.bancoId,
     estado: q.estado,
+    antiguedadMaxDias: q.antiguedadMaxDias,
   };
 }
 
@@ -81,7 +82,7 @@ function nombreArchivo(tipo: TipoReporte, f: ReportFilters, ext: string): string
   return nombre.replace(/[^A-Za-z0-9._-]/g, '-');
 }
 
-function subtitulo(f: ReportFilters): string {
+function subtitulo(tipo: TipoReporte, f: ReportFilters): string {
   const partes: string[] = [];
   partes.push(
     `Periodo: ${f.fechaDesde ?? 'inicio'} a ${f.fechaHasta ?? 'hoy'}`,
@@ -90,6 +91,11 @@ function subtitulo(f: ReportFilters): string {
     partes.push(
       `Movimiento: ${f.fechaMovimientoDesde ?? 'inicio'} a ${f.fechaMovimientoHasta ?? 'hoy'}`,
     );
+  }
+  // Only mention the age filter where it is actually applied (the `cobros`
+  // report); advertising an unapplied filter in the subtitle is misleading.
+  if (tipo === 'cobros' && f.antiguedadMaxDias) {
+    partes.push(`Antigüedad menor a: ${f.antiguedadMaxDias} días`);
   }
   if (f.cobradorId) partes.push(`Cobrador: ${f.cobradorId}`);
   if (f.bancoId) partes.push(`Banco: ${f.bancoId}`);
@@ -109,12 +115,13 @@ export const exportar = asyncHandler(async (req: Request, res: Response) => {
     cobradorId: q.cobradorId,
     bancoId: q.bancoId,
     estado: q.estado,
+    antiguedadMaxDias: q.antiguedadMaxDias,
   };
 
   const reporte = await service.datosParaExport(tipo, filtros, puedeVerAlertaAntiguedad(req));
 
   if (q.formato === 'pdf') {
-    const doc = service.generarPdf(reporte.titulo, subtitulo(filtros), reporte.bloques);
+    const doc = service.generarPdf(reporte.titulo, subtitulo(tipo, filtros), reporte.bloques);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
