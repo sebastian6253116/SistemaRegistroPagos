@@ -56,6 +56,7 @@ const PERMISOS: PermisoDef[] = [
   // Bank movements & import
   { clave: 'movimientos.ver', descripcion: 'Ver movimientos bancarios' },
   { clave: 'movimientos.importar', descripcion: 'Importar el Excel/CSV del banco' },
+  { clave: 'movimientos.eliminar', descripcion: 'Eliminar movimientos bancarios no conciliados' },
   // Expenses
   { clave: 'gastos.ver', descripcion: 'Ver gastos' },
   { clave: 'gastos.crear', descripcion: 'Registrar gastos' },

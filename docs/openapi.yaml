@@ -2766,6 +2766,24 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [Movimientos]
+      operationId: eliminarMovimiento
+      summary: Eliminar movimiento bancario no conciliado (hard delete)
+      description: 'Requiere permiso: movimientos.eliminar. Elimina permanentemente un movimiento bancario que NO este conciliado. Rechaza con 409 si el movimiento esta conciliado o si tiene un pago o una conciliacion asociados (incluida una conciliacion creada entre la lectura y el borrado). Eliminar un movimiento originado por un lote de importacion esta permitido: el lote es un registro historico, no un bloqueo. El registro de auditoria es la unica traza que sobrevive.'
+      responses:
+        '204':
+          description: Movimiento eliminado (sin contenido)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /importacion/plantilla:
     get:

@@ -15,3 +15,7 @@ export async function obtenerMovimiento(id: number): Promise<MovimientoBanco> {
   const { data } = await api.get<MovimientoBanco>(`/movimientos/${id}`);
   return data;
 }
+
+export async function eliminarMovimiento(id: number): Promise<void> {
+  await api.delete(`/movimientos/${id}`);
+}

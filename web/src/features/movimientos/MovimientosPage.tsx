@@ -1,18 +1,21 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import { FileSpreadsheet, Link2 } from 'lucide-react';
-import { listarMovimientos } from '@/api/movimientos';
+import { FileSpreadsheet, Link2, Trash2 } from 'lucide-react';
+import { eliminarMovimiento, listarMovimientos } from '@/api/movimientos';
 import { obtenerLote } from '@/api/importacion';
 import { listarCuentas } from '@/api/cuentas';
+import { getApiErrorMessage } from '@/api/client';
 import { queryKeys, STALE_CATALOGS, STALE_LISTS } from '@/lib/queryClient';
 import { useDebounce } from '@/hooks/useDebounce';
+import { usePermiso } from '@/hooks/usePermiso';
 import { formatBs, formatDate, formatDateTime } from '@/lib/format';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable } from '@/components/common/DataTable';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ClearFiltersButton } from '@/components/common/ClearFiltersButton';
 import { DateRangeFilter } from '@/components/common/DateRangeFilter';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,6 +23,7 @@ import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
 import { LoadingState } from '@/components/ui/spinner';
+import { useToast } from '@/components/ui/toast';
 import type { MovimientoBanco } from '@/types';
 
 const PAGE_SIZE = 20;
@@ -85,7 +89,13 @@ export default function MovimientosPage() {
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
   const [loteId, setLoteId] = useState<number | null>(null);
+  const [eliminarTarget, setEliminarTarget] = useState<MovimientoBanco | null>(null);
   const debouncedRef = useDebounce(referencia, 300);
+
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const { tiene } = usePermiso();
+  const puedeEliminar = tiene('movimientos.eliminar');
 
   const cuentas = useQuery({
     queryKey: queryKeys.cuentas({ pageSize: 200 }),
@@ -110,6 +120,16 @@ export default function MovimientosPage() {
     queryKey: queryKeys.movimientos(params),
     queryFn: () => listarMovimientos(params),
     staleTime: STALE_LISTS,
+  });
+
+  const eliminarMutation = useMutation({
+    mutationFn: (id: number) => eliminarMovimiento(id),
+    onSuccess: () => {
+      toast.success('Movimiento eliminado');
+      setEliminarTarget(null);
+      queryClient.invalidateQueries({ queryKey: ['movimientos'] });
+    },
+    onError: (error) => toast.error('No se pudo eliminar', getApiErrorMessage(error)),
   });
 
   const columns = useMemo<ColumnDef<MovimientoBanco, unknown>[]>(
@@ -172,8 +192,24 @@ export default function MovimientosPage() {
             <span className="text-xs text-muted-foreground">—</span>
           ),
       },
+      {
+        id: 'acciones',
+        header: '',
+        cell: ({ row }) =>
+          puedeEliminar && row.original.estadoConciliacion !== 'conciliado' ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-destructive"
+              onClick={() => setEliminarTarget(row.original)}
+              aria-label="Eliminar"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          ) : null,
+      },
     ],
-    [],
+    [puedeEliminar],
   );
 
   return (
@@ -282,6 +318,17 @@ export default function MovimientosPage() {
                   {row.lote.nombreArchivo}
                 </Button>
               )}
+              {puedeEliminar && row.estadoConciliacion !== 'conciliado' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive"
+                  onClick={() => setEliminarTarget(row)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Eliminar
+                </Button>
+              )}
             </div>
           )}
           emptyTitle="Sin movimientos bancarios"
@@ -307,6 +354,17 @@ export default function MovimientosPage() {
       )}
 
       <LoteDetalleDialog loteId={loteId} onClose={() => setLoteId(null)} />
+
+      <ConfirmDialog
+        open={eliminarTarget !== null}
+        onClose={() => setEliminarTarget(null)}
+        onConfirm={() => eliminarTarget && eliminarMutation.mutate(eliminarTarget.id)}
+        title="Eliminar movimiento bancario"
+        description="Esta acción es irreversible. Solo se pueden eliminar movimientos no conciliados. ¿Confirma que desea eliminar el movimiento?"
+        confirmLabel="Eliminar"
+        destructive
+        loading={eliminarMutation.isPending}
+      />
     </div>
   );
 }

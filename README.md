@@ -185,18 +185,20 @@ Creados por `npm run seed`. **Cambie estas credenciales antes de usar el sistema
 Modelo **granular**: tabla `permisos` + `rol_permisos`, verificado en middleware del backend
 **y** usado para ocultar UI en el frontend (`usePermiso`, `<RequierePermiso>`, `ProtectedRoute`).
 
-Claves principales (el seed define **41** en total): `pagos.reportar`, `pagos.ver_propios`,
+Claves principales (el seed define **42** en total): `pagos.reportar`, `pagos.ver_propios`,
 `pagos.ver_todos`, `pagos.validar`, `pagos.ver_alerta_antiguedad`, `pagos.rechazar`, `pagos.marcar_duplicado`,
 `pagos.validar_lote`, `pagos.eliminar`, `pagos.revertir_validacion`, `pagos.editar`,
 `movimientos.ver`,
-`movimientos.importar`, `gastos.*`, `tipos_pago.ver`, `tipos_pago.gestionar`, `tasas.ver`,
+`movimientos.importar`, `movimientos.eliminar`, `gastos.*`, `tipos_pago.ver`, `tipos_pago.gestionar`, `tasas.ver`,
 `tasas.gestionar`, `cobradores.ver`, `cobradores.gestionar`, `cobradores.eliminar_definitivo`,
 `bancos.ver`, `bancos.gestionar`,
 `cuentas.ver`, `cuentas.gestionar`, `dashboard.ver`, `reportes.ver`, `reportes.exportar`,
 `usuarios.*`, `usuarios.eliminar_definitivo`, `roles.*`, `config.ver`, `config.editar`, `auditoria.ver`.
 
-**Conteo de permisos por rol (verificado en la base):** Administrador **41** (todos),
-Administrativo **20**, Consultor **10** y Cobrador **3**; el catálogo total sigue en **41** claves.
+**Conteo de permisos por rol (verificado en la base):** Administrador **42** (todos),
+Administrativo **20**, Consultor **10** y Cobrador **3**; el catálogo total sigue en **42** claves.
+`movimientos.eliminar` (borrado permanente de movimientos bancarios no conciliados) se otorga
+**solo** al Administrador: el Administrativo ya importa la data bancaria y no debe tener control total.
 
 La antigüedad de un cobro **ya no** se calcula contra "hoy" ni depende de una alerta por permiso: el
 veredicto (`tipo_cobro_derivado` + `fuente_derivacion = 'movimiento'`) se determina y **persiste al
