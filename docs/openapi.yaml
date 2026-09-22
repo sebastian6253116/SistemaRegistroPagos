@@ -2795,7 +2795,9 @@ paths:
         con la hoja `Movimientos`: la fila 1 es el encabezado en negrita
         (`Referencia` | `Monto en Bs` | `Fecha de ejecucion`) y la fila 2 es una unica fila de
         ejemplo (`EJEMPLO-0000` | `0,01` | `01/01/2000`). La fila de ejemplo debe reemplazarse o
-        eliminarse antes de importar: los movimientos importados no se pueden eliminar.
+        eliminarse antes de importar. Un movimiento importado por error si se puede eliminar
+        despues con `DELETE /movimientos/{id}` (permiso `movimientos.eliminar`), solo mientras no
+        este conciliado.
       responses:
         '200':
           description: Archivo Excel (.xlsx) con la plantilla de importacion

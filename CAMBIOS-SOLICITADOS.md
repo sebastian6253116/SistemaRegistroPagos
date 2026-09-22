@@ -33,7 +33,15 @@ decisiones que faltaban cerrar.
 > `pagos_reportados.fuente_derivacion`), con el comparador final `>=` ("N días o más = viejo") y
 > **sin migración de datos**. **No agrega endpoints**: OpenAPI sigue en **103** operaciones y Postman
 > en **103** peticiones; los permisos siguen en **41** (el permiso `pagos.ver_alerta_antiguedad`
-> queda **huérfano**, ya no lo lee la API ni la UI).
+> queda **huérfano**, ya no lo lee la API ni la UI). Su **backfill** histórico llegó como
+> *follow-up* en `f2ae1a7` (ver [`CHANGELOG.md`](./CHANGELOG.md) §15.1).
+>
+> **CR-006 implementado** (2026-09-22; ver [`CHANGELOG.md`](./CHANGELOG.md) §15): baja de
+> **movimientos bancarios no conciliados** con permiso propio **`movimientos.eliminar`** (solo
+> Administrador). **Agrega 1 endpoint** (OpenAPI **103 → 104**, Postman **103 → 104**) y **1
+> permiso** (**41 → 42**), **sin cambios de esquema**. La misma iteración (§15) incluye el
+> **backfill** del veredicto de CR-005, el reemplazo del filtro de antigüedad por uno de
+> clasificación y la extracción del filtro de rango de fechas.
 
 ---
 
@@ -692,6 +700,14 @@ operaciones y Postman en **100** peticiones.
 >    en el valor **`1`** ya configurado por el dueño y **NO** se migran datos (se descarta la
 >    migración que bajaba `cobro.umbral_antiguedad_dias`).
 
+> **Nota (2026-09-22): el backfill llegó como follow-up.** CR-005 dejó los pagos históricos con
+> `fuente_derivacion = NULL` (sin migración de datos), así que los reportes de nuevo/viejo mostraban
+> **cero**. La deuda se cerró en la iteración siguiente con el commit **`f2ae1a7`**
+> (`20260922000000_backfill_veredicto_movimiento`): un `UPDATE` idempotente que re-deriva el veredicto
+> del histórico, con el umbral leído de `parametros`. El detalle está en
+> [`CHANGELOG.md`](./CHANGELOG.md) §15.1. Además, el filtro `antiguedadMaxDias` documentado en §5 de
+> esta entrada fue **reemplazado** por el filtro de clasificación `clasificacionAntiguedad` (§15.3).
+
 ### 1. Cálculo y veredicto (verificado en código)
 
 | Hecho | Evidencia |
@@ -780,3 +796,105 @@ operaciones y Postman en **100** peticiones.
   pero **no** determinan el veredicto que leen los reportes.
 - No se declararon en `docs/openapi.yaml` los parámetros de filtro `antiguedadMaxDias` ni
   `fechaMovimientoDesde`/`fechaMovimientoHasta` (ya ausentes antes de CR-005).
+
+> **Actualización (2026-09-22):** la primera viñeta quedó **sin efecto** — el backfill llegó como
+> `f2ae1a7` y los pagos históricos **sí** entran en los buckets de nuevo/viejo (ver
+> [`CHANGELOG.md`](./CHANGELOG.md) §15.1).
+
+---
+
+## CR-006 — Baja de movimientos bancarios no conciliados
+
+| Campo | Valor |
+|---|---|
+| **Fecha** | 2026-09-22 |
+| **Estado** | **IMPLEMENTADO (2026-09-22)** — ver «Estado de implementación» y [`CHANGELOG.md`](./CHANGELOG.md) §15 |
+| **Solicitante** | Negocio (Dueño del proceso de cobros) |
+| **Área** | Backend (`api/src/modules/movimientos/`), seguridad/permisos (`api/prisma/seed.ts` + migración) y UI de movimientos (`web/src/features/movimientos/`) |
+| **Impacto** | 1 endpoint nuevo (`DELETE /movimientos/{id}`), contrato de API (OpenAPI/Postman), 1 permiso nuevo y UI de movimientos; **sin cambios de esquema** |
+
+> **Estado de implementación (2026-09-22).** Un movimiento bancario solo podía listarse y leerse, así
+> que uno importado por error no se podía quitar. Ahora se puede **eliminar** desde la UI, gobernado
+> por un **permiso propio** y **solo mientras no esté conciliado**. El detalle completo está en el
+> [`CHANGELOG.md`](./CHANGELOG.md) §15. Resumen verificado contra el código:
+>
+> - **Permiso `movimientos.eliminar`, solo para Administrador.** El rol **Administrativo NO** lo
+>   recibe: ya importa la data bancaria y no debe tener además el control de borrarla.
+> - **Borrado físico auditado.** El `delete` y la entrada de auditoría comparten **una sola
+>   transacción** (la instantánea es la única traza que sobrevive).
+> - **409 si el movimiento está conciliado**, más un **guard defensivo de carrera** que cuenta pagos
+>   y conciliaciones vinculados **dentro de la misma transacción** (y traduce a **409** la violación
+>   de FK concurrente).
+> - **Borrar un movimiento de un lote de importación SÍ está permitido:** el lote es un registro
+>   histórico, no un bloqueo.
+> - **Contrato y conteos (verificado):** **1 endpoint nuevo** — OpenAPI **103 → 104** operaciones y
+>   Postman **103 → 104** peticiones. Permisos **41 → 42** (Administrador los **42**; Administrativo
+>   **20**; Consultor **10**; Cobrador **3**). **Sin cambios de esquema.**
+>
+> **Decisiones del dueño (2026-09-22), registradas explícitamente:**
+>
+> 1. **Permiso solo para Administrador:** el Administrativo ya importa la data bancaria y **no** debe
+>    tener el permiso de eliminarla.
+> 2. **Borrar desde un lote de importación está permitido:** el lote es un registro histórico de la
+>    importación, **no** un candado sobre sus movimientos.
+
+### 1. Endpoint y permisos (verificado en código)
+
+| Hecho | Evidencia |
+|---|---|
+| Endpoint `DELETE /api/movimientos/:id` | `api/src/modules/movimientos/movimientos.routes.ts:27-32`: `router.delete('/:id', requirePermiso('movimientos.eliminar'), validate({ params: idParamSchema }), controller.eliminar)`. Responde **204** sin cuerpo. |
+| Permiso nuevo | `api/prisma/seed.ts:59`: `{ clave: 'movimientos.eliminar', descripcion: 'Eliminar movimientos bancarios no conciliados' }`; el rol Administrador lo recibe por `ALL`. Catálogo **42** claves. |
+| Migración de permiso | `api/prisma/migrations/20260923000000_permiso_eliminar_movimientos/migration.sql`: `INSERT IGNORE` del permiso y de su concesión **solo** a `Administrador`. El Administrativo no lo recibe. |
+| Rutas sin guard global | `movimientos.routes.ts:10-13`: solo `authenticate` es global; cada ruta declara su permiso, de modo que un usuario con solo `movimientos.eliminar` **no** queda bloqueado por `movimientos.ver`. |
+
+### 2. Borrado físico auditado y guardas (verificado en código)
+
+| Hecho | Evidencia |
+|---|---|
+| 409 si está conciliado | `movimientos.service.ts:121-123`: si `estadoConciliacion === 'conciliado'`, lanza `ApiError.conflict(...)`. |
+| Guard defensivo de carrera | `movimientos.service.ts:128-134`: cuenta `pagoReportado` y `conciliacion` vinculados **dentro de la transacción**; si alguno es `> 0`, responde **409** aunque el estado fuera `no_conciliado`. |
+| FK concurrente → 409 | `movimientos.service.ts:136-149`: la violación `P2003` se traduce a un **409** accionable en vez de un error crudo. |
+| Auditoría atómica | `movimientos.service.ts:154-164`: `auditar({ entidad: 'movimientos_banco', accion: 'borrar', datosAntes: snapshot(movimiento) }, tx)` **dentro** de la misma transacción; un fallo revierte todo el borrado. |
+| Lote de importación permitido | El servicio **no** bloquea por `loteImportacionId`; el comentario `movimientos.service.ts:109-110` lo deja explícito: «el lote es un registro histórico, no un bloqueo». |
+
+### 3. UI (verificado en código)
+
+| Hecho | Evidencia |
+|---|---|
+| Acción «Eliminar» | `web/src/features/movimientos/MovimientosPage.tsx`: ícono de fila y botón «Eliminar», visibles solo con `puedeEliminar` (`usePermiso().tiene('movimientos.eliminar')`) y sobre movimientos con `estadoConciliacion !== 'conciliado'`. |
+| Confirmación irreversible | `ConfirmDialog` con descripción explícita: «Esta acción es irreversible. Solo se pueden eliminar movimientos no conciliados…». |
+| Cliente API | `web/src/api/movimientos.ts`: `eliminarMovimiento(id)` → `api.delete('/movimientos/${id}')`. |
+
+### 4. Verificación (2026-09-22)
+
+- **Tests unitarios:** `api` → **119 passed / 12 archivos**, incluida la suite nueva
+  `movimientos-eliminar` (7 casos).
+- **Integración:** **26 passed / 4 archivos**, incluida `movimientos.int.test.ts` (5 casos HTTP:
+  204 + auditoría, 409 conciliado, 409 con pago vinculado, **403 Administrativo**, 404 inexistente).
+- **Permisos:** **42** en `api/prisma/seed.ts`; Administrador **42**, Administrativo **20**,
+  Consultor **10**, Cobrador **3**. La base local confirma que Administrador tiene
+  `movimientos.eliminar` y Administrativo **no**.
+- **Contratos:** OpenAPI **104** operaciones y Postman **104** peticiones (**+1** por el
+  `DELETE /movimientos/{id}`).
+- **Compilación:** `npm run build` en `api/` **OK** y en `web/` **OK**.
+
+### 5. Archivos
+
+- **Backend:** `api/src/modules/movimientos/movimientos.routes.ts`,
+  `movimientos.controller.ts`, `movimientos.service.ts` (`eliminarMovimiento`).
+- **Permisos y migración:** `api/prisma/seed.ts`,
+  `api/prisma/migrations/20260923000000_permiso_eliminar_movimientos/`.
+- **Frontend:** `web/src/features/movimientos/MovimientosPage.tsx`,
+  `web/src/api/movimientos.ts`.
+- **Tests:** `api/tests/movimientos-eliminar.test.ts`,
+  `api/tests/integration/movimientos.int.test.ts`.
+- **Contratos y docs:** `docs/openapi.yaml`, `docs/postman_collection.json`, los tres README,
+  `CAMBIOS-SOLICITADOS.md` y [`CHANGELOG.md`](./CHANGELOG.md).
+
+### 6. Fuera de alcance
+
+- **No** se permite eliminar un movimiento conciliado: hay que **revertir la conciliación** primero
+  (la conciliación se libera al revertir el pago, §8.9 del README).
+- **No** se agrega borrado en lote ni papelera: es un borrado físico de a uno, sin recuperación (solo
+  queda la traza en auditoría).
+- **No** se modifica el invariante «un movimiento bancario ↔ un pago reportado».

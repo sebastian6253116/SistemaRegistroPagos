@@ -951,6 +951,12 @@ en el **toast de validación** y en la **columna «Antigüedad»** de la bandeja
 umbral:** la comparación final es `>=` ("N días o más = viejo") con el umbral en el **`1`** ya
 configurado por el dueño, **sin migración de datos**.
 
+> **Filtro SUPERADO por §15 (`d74ffc9`).** El filtro numérico `antiguedadMaxDias` descrito en §14.4
+> se **retiró de punta a punta** y se reemplazó por el filtro de clasificación `clasificacionAntiguedad`
+> (`del-dia` / `viejo`); además, la columna de antigüedad del reporte pasó a distinguir «Del día»
+> (§15.2). El **modelo de persistencia** del veredicto descrito en §14.1–§14.3 sigue vigente; el
+> **backfill** del histórico que §14.2 dejó fuera llegó como `f2ae1a7` (§15.1).
+
 ### 14.1 Cálculo y veredicto
 
 - **Brecha firmada en días completos.** `antiguedadEnDias(fechaPago, fechaEjecucionMovimiento)`
@@ -1054,5 +1060,151 @@ configurado por el dueño, **sin migración de datos**.
   `web/src/features/pagos/{pago-utils,MisPagosPage}.tsx`,
   `web/src/features/reportes/ReportesPage.tsx`, `web/src/types/index.ts` — columna «Antigüedad»,
   toast y retiro de la alerta.
+- `docs/openapi.yaml`, `docs/postman_collection.json`, los tres README, `CAMBIOS-SOLICITADOS.md` y
+  este `CHANGELOG.md` — sincronización documental.
+
+---
+
+## 15. Iteración 11 — Backfill del veredicto, filtro por clasificación, filtro de fechas reutilizable y baja de movimientos bancarios
+
+Esta iteración cierra la deuda que dejó CR-005 (el veredicto persistido quedaba en `NULL` para el
+histórico), reemplaza el filtro numérico de antigüedad por uno de clasificación, extrae el filtro de
+rango de fechas a un componente compartido y habilita la baja de movimientos bancarios no
+conciliados. A diferencia de las iteraciones 6, 7 y 10, esta **sí agrega un endpoint**: OpenAPI
+**103 → 104** operaciones y Postman **103 → 104** peticiones. Suma **1 permiso** (**41 → 42**),
+**sin cambios de esquema**; las dos migraciones del rango son **de datos** (un backfill del
+veredicto y una fila de permiso). Registro prospectivo original de la baja en
+[`CAMBIOS-SOLICITADOS.md`](./CAMBIOS-SOLICITADOS.md) (CR-006).
+
+### 15.1 Backfill del veredicto de antigüedad (`f2ae1a7`)
+
+- **El problema.** `894b8ac` (CR-005, §14) empezó a persistir el veredicto al validar, pero la
+  columna `fuente_derivacion` se había agregado **sin backfill**: todo pago validado antes de ese
+  despliegue quedó con `fuente_derivacion IS NULL`. Como los reportes de nuevo/viejo filtran
+  `fuente_derivacion = 'movimiento'`, esas filas quedaban **excluidas** y los gráficos mostraban
+  **cero**.
+- **Migración** `api/prisma/migrations/20260922000000_backfill_veredicto_movimiento/migration.sql`:
+  un único `UPDATE pagos_reportados p JOIN movimientos_banco mb` que re-deriva el veredicto del
+  histórico. `hueco = DATEDIFF(p.fecha_pago, mb.fecha_ejecucion)` es una **brecha firmada** en días
+  completos (ambas columnas son `DATE`) y `hueco >= umbral` espeja `esPagoViejo`; una brecha
+  negativa nunca es vieja.
+- **Umbral leído de `parametros`, nunca hardcodeado:**
+  `COALESCE((SELECT CAST(valor AS SIGNED) FROM parametros WHERE clave = 'cobro.umbral_antiguedad_dias'), 1)`,
+  porque el valor depende del entorno (local `30`, producción `1`); el respaldo es **`1`**.
+- `revisar_clasificacion` se **recomputa en línea** en vez de leer la columna recién asignada en el
+  mismo `UPDATE` (cuyo orden de evaluación de `SET` no está garantizado); `tipo_cobro` —la marca del
+  cobrador— **nunca** se sobrescribe.
+- **Guard de idempotencia:** `WHERE p.estado = 'validado' AND p.movimiento_banco_id IS NOT NULL AND
+  (p.fuente_derivacion IS NULL OR p.fuente_derivacion <> 'movimiento')`. Una segunda corrida
+  **converge** en vez de reescribir.
+- **Los pagos no validados no se tocan:** no tienen movimiento vinculado, así que no hay veredicto
+  que derivar; las filas validadas sin movimiento se excluyen por el `INNER JOIN`.
+- **Irreversible:** reclasifica datos históricos in situ; no hay down-migration (revertir exige
+  restaurar un respaldo o volver a desplegar la versión previa).
+
+### 15.2 Columna de antigüedad: badge «Del día» (`0c39324`)
+
+- `web/src/features/reportes/ReportesPage.tsx`: la columna «Viejo» ahora renderiza con
+  `VeredictoAntiguedad`, un único renderer local compartido por la columna de escritorio y la
+  tarjeta móvil: `antiguedadDias == null` → guion atenuado (sin movimiento vinculado); `> 0` →
+  badge `warning` «Viejo»; `<= 0` → badge `success` «Del día».
+- El discriminador es el campo **firmado `antiguedadDias`**, no el booleano `esViejo`: un booleano
+  no puede separar «del día» de «sin movimiento vinculado». Una brecha negativa (movimiento
+  posterior) no es vieja y se muestra como «Del día»; el valor firmado sigue visible en la columna
+  «Antigüedad».
+
+### 15.3 Filtro por clasificación (`d74ffc9`)
+
+- **Se retira `antiguedadMaxDias` de punta a punta** y se agrega `clasificacionAntiguedad`
+  (`'del-dia' | 'viejo'`) en `api/src/modules/reportes/reportes.schema.ts`,
+  `reportes.controller.ts`, `web/src/api/reportes.ts` y `ReportesPage.tsx` (select «Clasificación»
+  con Todas / Del día / Viejo, visible solo en la pestaña `cobros`, como el rango de fecha del
+  movimiento).
+- El filtro se resuelve como un `EXISTS` correlacionado contra el movimiento vinculado
+  (`condicionClasificacionAntiguedadSql`): `viejo` =
+  `DATEDIFF(p.fecha_pago, mb.fecha_ejecucion) >= UMBRAL_ANTIGUEDAD_SQL`; `del-dia` =
+  `DATEDIFF(...) <= 0`. `UMBRAL_ANTIGUEDAD_SQL` lee el umbral de `parametros` con respaldo `1`,
+  igual que el backfill, para no duplicar la regla.
+- Como Prisma no expresa el `DATEDIFF` por fila, `cobros` resuelve primero los ids con el **mismo**
+  `EXISTS` (`idsClasificacionAntiguedad`) y los pasa a `wherePagosPrisma`; una lista vacía significa
+  «ningún pago» y un pago **sin movimiento vinculado queda excluido** mientras el filtro esté
+  activo.
+- Cobertura: `api/tests/reportes-schema.test.ts` (3 casos) y
+  `api/tests/integration/reportes.int.test.ts` (3 casos HTTP: ambos buckets y la exclusión de los no
+  vinculados).
+
+### 15.4 `DateRangeFilter` y el modal rechazado (`0f2e772` + `e40e508` + `0f40619`)
+
+- **Extracción conservada (`0f2e772`).** El mismo par de inputs `type="date"` estaba duplicado en
+  nueve barras de filtros. Se extrajo `web/src/components/common/DateRangeFilter.tsx`, que renderiza
+  los dos envoltorios de celda que las barras ya usaban (la grilla del llamador conserva el layout)
+  y emite cadenas `YYYY-MM-DD` sin pasar por `Date`/`toISOString` (evita el corrimiento de un día en
+  `America/Caracas`). Adoptado en 9 vistas: Auditoría, Historial BCV, Tasas, Gastos, Movimientos,
+  Mis pagos, Reportes, Validación y Configuración.
+- **Modal introducido y RECHAZADO (`e40e508` → `0f40619`).** Un commit posterior convirtió el
+  componente en un único disparador que resumía el rango y abría un modal con ambos extremos. El
+  dueño **no aceptó esa UX** y el cambio se **revirtió** (`0f40619`). **El modal NO es una
+  funcionalidad viva:** el componente quedó con los dos inputs originales (versión de `0f2e772`) y
+  así se usa hoy.
+- Se documenta como historia de la decisión: la **extracción sobrevivió**; el **modal se descartó**.
+
+### 15.5 Baja de movimientos bancarios no conciliados (`34dae98`, CR-006)
+
+- Nuevo endpoint `DELETE /api/movimientos/{id}` (permiso **`movimientos.eliminar`**, concedido
+  **solo al Administrador**). El servicio `eliminarMovimiento()`
+  (`api/src/modules/movimientos/movimientos.service.ts`) hace un **borrado físico auditado**:
+  rechaza con **409** un movimiento conciliado, cuenta defensivamente los pagos y conciliaciones
+  vinculados **dentro de la misma transacción** (cierra la carrera lectura→borrado) y traduce a
+  **409** la violación de FK concurrente (`P2003`). Eliminar un movimiento proveniente de un lote de
+  importación **está permitido**: el lote es un registro histórico, no un bloqueo.
+- Las rutas de `movimientos` dejaron de aplicar `movimientos.ver` de forma global: ahora solo
+  `authenticate` es global y cada ruta declara su permiso, de modo que el `DELETE` se gobierna por
+  `movimientos.eliminar` (un usuario con solo ese permiso no queda bloqueado por `movimientos.ver`).
+- UI: acción «Eliminar» (ícono de fila y botón) en
+  `web/src/features/movimientos/MovimientosPage.tsx`, visible solo con el permiso y sobre
+  movimientos no conciliados, con `ConfirmDialog` de advertencia irreversible.
+- El detalle completo del pedido está en [`CAMBIOS-SOLICITADOS.md`](./CAMBIOS-SOLICITADOS.md)
+  (CR-006).
+
+### 15.6 Verificación
+
+- **Tests unitarios:** `npm test` en `api/` → **119 passed / 12 archivos**. Nuevas suites:
+  `movimientos-eliminar` (7 casos) y `reportes-schema` (3 casos); se conservan `classification`
+  (16) y `matcher` (31).
+- **Integración:** **26 passed / 4 archivos** (`npm run test:integration`), incluidas
+  `backfill-veredicto.int.test.ts` (4 casos: borde del umbral, brecha negativa, regla de mismatch,
+  filas intactas e idempotencia) y `movimientos.int.test.ts` (5 casos HTTP: 204 + auditoría, 409
+  conciliado, 409 con pago vinculado, 403 Administrativo, 404 inexistente).
+- **Compilación:** `npm run build` en `api/` **OK** y en `web/` **OK**.
+- **Permisos (verificado en `api/prisma/seed.ts`):** **41 → 42** claves. Nueva
+  `movimientos.eliminar`, otorgada **solo al Administrador**; Administrativo **20**, Consultor
+  **10**, Cobrador **3**.
+- **Migraciones (2, ambas de datos; sin cambios de esquema):**
+  `20260922000000_backfill_veredicto_movimiento` (backfill del veredicto histórico) y
+  `20260923000000_permiso_eliminar_movimientos` (inserta `movimientos.eliminar` y lo otorga a
+  Administrador).
+- **Contratos:** `docs/openapi.yaml` **103 → 104** operaciones y `docs/postman_collection.json`
+  **103 → 104** peticiones (el `DELETE /movimientos/{id}`).
+
+**Con un endpoint nuevo:** OpenAPI **103 → 104** operaciones y Postman **103 → 104** peticiones.
+
+### 15.7 Archivos de esta iteración
+
+- `api/prisma/migrations/20260922000000_backfill_veredicto_movimiento/migration.sql` — backfill
+  idempotente del veredicto.
+- `api/prisma/migrations/20260923000000_permiso_eliminar_movimientos/migration.sql` — permiso
+  `movimientos.eliminar`.
+- `api/prisma/seed.ts` — `movimientos.eliminar` (42 permisos).
+- `api/src/modules/movimientos/{movimientos.routes,movimientos.controller,movimientos.service}.ts` —
+  `DELETE /:id`, guards y borrado auditado.
+- `api/src/modules/reportes/{reportes.schema,reportes.controller,reportes.service}.ts` —
+  `clasificacionAntiguedad`; `antiguedadMaxDias` retirado.
+- `web/src/components/common/DateRangeFilter.tsx` — componente compartido (versión de dos inputs; el
+  modal fue revertido).
+- `web/src/features/reportes/ReportesPage.tsx`, `web/src/api/reportes.ts` — badge «Del día» y filtro
+  de clasificación.
+- `web/src/features/movimientos/MovimientosPage.tsx`, `web/src/api/movimientos.ts` — acción de baja.
+- `api/tests/movimientos-eliminar.test.ts`, `api/tests/reportes-schema.test.ts`,
+  `api/tests/integration/{backfill-veredicto,movimientos,reportes}.int.test.ts` — cobertura nueva.
 - `docs/openapi.yaml`, `docs/postman_collection.json`, los tres README, `CAMBIOS-SOLICITADOS.md` y
   este `CHANGELOG.md` — sincronización documental.

@@ -75,7 +75,7 @@ solo el último valor; el histórico lo construye este backend.
 
 ## Endpoints
 
-- `../docs/openapi.yaml` — especificación OpenAPI 3.0.3 (103 operaciones)
+- `../docs/openapi.yaml` — especificación OpenAPI 3.0.3 (104 operaciones)
 - `../docs/postman_collection.json` — colección Postman con variables y auto-login
 - `../docs/schema.sql` — script SQL completo del esquema. Nota: es un artefacto derivado y puede
   quedar rezagado respecto de `schema.prisma` + `migrations/`, que son la fuente de verdad (ver
@@ -89,6 +89,7 @@ Módulos y grupos ya incluidos en esa especificación:
 | `notificaciones` | `GET /notificaciones`, `GET /notificaciones/no-leidas`, `PATCH /notificaciones/:id/leida`, `PATCH /notificaciones/leer-todas` |
 | `tasas-bcv` | `GET /tasas-bcv/actual`, `GET /tasas-bcv/historial`, `GET /tasas-bcv/job`, `PUT /tasas-bcv/job`, `POST /tasas-bcv/sincronizar` |
 | `pagos` (ampliación) | `POST /pagos/:id/soporte`, `PUT /pagos/:id` (edición, incluidos los pagos **validados** con el permiso `pagos.editar`), `DELETE /pagos/:id` (borrado físico, permiso `pagos.eliminar`, solo pagos no validados), `POST /pagos/:id/revertir` (permiso `pagos.revertir_validacion`, inverso de la validación) |
+| `movimientos` (ampliación) | `DELETE /movimientos/:id` (borrado físico, permiso `movimientos.eliminar`, solo movimientos **no** conciliados; **409** si está conciliado; la instantánea queda en auditoría) |
 | `cuentas` (ampliación) | `PUT /cuentas/:id/default` |
 | `catalogos` (ampliación) | `GET /catalogos/form-pago` ahora incluye `tiposPago`, `defaults` y `reglas` |
 | `archivos` | `GET /uploads/:filename` (montado en `/api/uploads/:filename`): descarga autenticada y autorizada por archivo de los soportes almacenados |
@@ -139,9 +140,9 @@ petición directa a `GET /uploads/...` responde **404** (se eliminó el `express
 - Reenviada a `POST /importacion/preview` con `primeraFilaEsEncabezado=true` (el valor por defecto
   de la UI), la plantilla sin modificar produce `filasTotales: 1` y `erroresDeteccion: 0`. Sin ese
   flag, la fila de encabezado se interpreta como fila de datos y el monto falla la validación.
-- La fila de ejemplo debe **reemplazarse o eliminarse** antes de importar: los movimientos
-  importados **no se pueden eliminar** desde la aplicación (el módulo `movimientos` solo expone
-  `GET /movimientos` y `GET /movimientos/:id`).
+- La fila de ejemplo debe **reemplazarse o eliminarse** antes de importar. Un movimiento importado
+  por error **sí** puede eliminarse después: `DELETE /movimientos/:id` (permiso
+  `movimientos.eliminar`, solo movimientos **no** conciliados).
 
 ### Eliminación y reversión de pagos
 
@@ -176,10 +177,11 @@ petición directa a `GET /uploads/...` responde **404** (se eliminó el `express
   revertirse la validación).
 - El permiso **`pagos.editar`** se siembra en `api/prisma/seed.ts` y se concede al rol
   **Administrador** vía `ALL` y al rol **Administrativo** (que además recibe
-  `pagos.revertir_validacion`). Con él el seed define **41 permisos** en total y estos conteos por
-  rol, verificados en la base: Administrador **41**, Administrativo **20**, Consultor **10**,
-  Cobrador **3**. El rol **Consultor** conserva `pagos.ver_todos`, pero es **estrictamente de solo
-  lectura**: `pagos.ver_todos` no habilita ninguna ruta de escritura.
+  `pagos.revertir_validacion`). El permiso **`movimientos.eliminar`** (baja de movimientos no
+  conciliados) se concede **solo** al Administrador. Con ellos el seed define **42 permisos** en
+  total y estos conteos por rol, verificados en la base: Administrador **42**, Administrativo
+  **20**, Consultor **10**, Cobrador **3**. El rol **Consultor** conserva `pagos.ver_todos`, pero es
+  **estrictamente de solo lectura**: `pagos.ver_todos` no habilita ninguna ruta de escritura.
 - La **antigüedad** de un cobro (`antiguedadDias`/`esViejo` en el reporte de cobros) se calcula
   contra la `fechaEjecucion` del **movimiento bancario vinculado**, no contra la fecha de documento:
   la brecha entre la `fechaPago` reportada por el cobrador y la fecha del movimiento determina el

@@ -95,8 +95,8 @@ usar un `<a href>` directo (el JWT vive en `localStorage` y lo agrega el interce
   el nombre que indica el `Content-Disposition` del servidor
   (`plantilla-importacion-bancaria.xlsx`).
 - La tarjeta muestra además un aviso: la **fila de ejemplo** de la plantilla debe **reemplazarse o
-  eliminarse** antes de importar, porque los **movimientos importados no se pueden eliminar** desde
-  la aplicación.
+  eliminarse** antes de importar. Un movimiento importado por error **sí** puede eliminarse después
+  desde `/movimientos` (permiso `movimientos.eliminar`, solo si **no** está conciliado).
 - La casilla **«La primera fila es encabezado»** viene **marcada** por defecto
   (`primeraFilaEsEncabezado = true`), que es la lectura correcta de la plantilla.
 

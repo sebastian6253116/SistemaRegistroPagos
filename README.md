@@ -289,8 +289,9 @@ tasa = monto_bs / monto_usd      # 3.600,00 Bs / 20,00 USD = 180,000000
 - Resumen final + descarga del detalle de errores.
 - La UI ofrece **«Descargar plantilla»** (`GET /api/importacion/plantilla`, permiso
   `movimientos.importar`): un `.xlsx` con la hoja `Movimientos`, encabezado en negrita y **una fila
-  de ejemplo** que debe reemplazarse o eliminarse antes de importar, porque **los movimientos
-  importados no se pueden eliminar** desde la aplicación.
+  de ejemplo** que debe reemplazarse o eliminarse antes de importar. Un movimiento importado por
+  error **sí** se puede eliminar después (`DELETE /movimientos/:id`, permiso `movimientos.eliminar`,
+  solo si **no** está conciliado; ver 10.1).
 
 ### 8.5 Gastos
 
@@ -399,8 +400,8 @@ Fecha, monto (Bs y USD con tasa derivada), descripción, categoría, referencia 
 ## 10. API
 
 - Base: `http://localhost:4000/api`
-- Documentación base: `docs/openapi.yaml` (103 operaciones) y `docs/postman_collection.json`
-  (103 peticiones), que ya incluyen todos los grupos actuales. Los grupos de endpoints se resumen
+- Documentación base: `docs/openapi.yaml` (104 operaciones) y `docs/postman_collection.json`
+  (104 peticiones), que ya incluyen todos los grupos actuales. Los grupos de endpoints se resumen
   en la sección 10.1.
 - Todas las consultas de listado son **paginadas del lado del servidor**
   (`{ data, meta: { page, pageSize, total, totalPages } }`), con búsqueda y filtros por querystring.
@@ -439,6 +440,9 @@ Grupos de endpoints agregados:
   (ver 8.10).
 - **Importación bancaria:** `GET /importacion/plantilla` (descarga la plantilla `.xlsx` con la
   hoja `Movimientos`: encabezado en negrita y **1 fila de ejemplo**; permiso `movimientos.importar`).
+- **Movimientos bancarios:** `DELETE /movimientos/:id` (borrado físico, permiso
+  `movimientos.eliminar`, solo movimientos **no** conciliados; responde **409** si está conciliado;
+  la instantánea queda en la auditoría). El `GET` sigue gobernado por `movimientos.ver`.
 - **Notificaciones:** `GET /notificaciones`, `GET /notificaciones/no-leidas`,
   `PATCH /notificaciones/:id/leida` y `PATCH /notificaciones/leer-todas`.
 - **Tasa BCV:** `GET /tasas-bcv/actual`, `GET /tasas-bcv/historial`, `GET /tasas-bcv/job`,
@@ -563,10 +567,10 @@ lista de orígenes · bloqueo de cuenta tras N intentos fallidos · auditoría d
 | 10. Auditoría y pulido de UX | ✅ |
 | 11. Tipos de pago, notificaciones, tasa BCV, modo oscuro y móvil | ✅ |
 
-**Tests:** 109 tests unitarios en verde en 10 archivos (cálculo de tasa, motor de conciliación
+**Tests:** 119 tests unitarios en verde en 12 archivos (cálculo de tasa, motor de conciliación
 —incluidas la re-evaluación del vínculo `evaluarVinculoConciliacion` y la detección de duplicados
-`coincideReferenciaMonto`—, parser de Excel, antigüedad pago ↔ movimiento y parser de la respuesta
-de la tasa BCV).
+`coincideReferenciaMonto`—, parser de Excel, antigüedad pago ↔ movimiento, baja de movimientos y
+parser de la respuesta de la tasa BCV).
 
 **Datos de demostración:** `npm run seed:demo` genera ~30 días de actividad (pagos reportados,
 conciliaciones, movimientos sin conciliar, gastos y tasas de referencia) para que el dashboard
