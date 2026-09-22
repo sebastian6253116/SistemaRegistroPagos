@@ -198,8 +198,13 @@ Claves principales (el seed define **41** en total): `pagos.reportar`, `pagos.ve
 **Conteo de permisos por rol (verificado en la base):** Administrador **41** (todos),
 Administrativo **20**, Consultor **10** y Cobrador **3**; el catálogo total sigue en **41** claves.
 
-La alerta de **documento viejo** (`alertaAntiguedadDias`) exige `pagos.ver_alerta_antiguedad`; sin él
-la API devuelve el campo en `null` (nunca lo filtra el frontend solo).
+La antigüedad de un cobro **ya no** se calcula contra "hoy" ni depende de una alerta por permiso: el
+veredicto (`tipo_cobro_derivado` + `fuente_derivacion = 'movimiento'`) se determina y **persiste al
+validar**, como la brecha entre la `fecha_pago` reportada por el cobrador y la `fecha_ejecucion` del
+movimiento bancario vinculado (0 = pago del día; positivo = movimiento anterior = viejo). El umbral
+`cobro.umbral_antiguedad_dias` se lee como "**N días o más = viejo**" (`>=`). El campo
+`alertaAntiguedadDias` fue retirado del contrato y de la UI; el permiso `pagos.ver_alerta_antiguedad`
+**sigue en la base y el seed** pero ya **no lo lee** ni la API ni la UI (permiso huérfano).
 
 **`pagos.ver_todos` es un permiso de SOLO LECTURA.** Permite ver los pagos de todos los
 cobradores (listado y detalle), pero **no** concede escritura: las rutas de escritura sobre pagos
@@ -255,13 +260,22 @@ tasa = monto_bs / monto_usd      # 3.600,00 Bs / 20,00 USD = 180,000000
 
 ### 8.3 Cobro nuevo vs. viejo
 
-- El cobrador marca `tipo_cobro`; el sistema **deriva** una clasificación por antigüedad
-  (umbral configurable, 30 días por defecto) cuando se informa la fecha del documento.
-- Si difieren, se marca `revisar_clasificacion = true` **sin sobrescribir** lo que puso el cobrador.
-- El mismo umbral (`cobro.umbral_antiguedad_dias`) alimenta la **alerta de "documento viejo"**
-  contra el movimiento bancario: si la fecha de ejecución del movimiento conciliado es posterior a
-  la fecha del pago por más de ese umbral, el pago expone `alertaAntiguedadDias` y se resalta en la
-  sección de pagos y en el reporte de cobros.
+- El cobrador marca `tipo_cobro`; al **validar**, el sistema deriva el veredicto de antigüedad a
+  partir del **movimiento bancario vinculado**: la brecha en días completos entre la `fecha_pago`
+  reportada y la `fecha_ejecucion` del movimiento (`antiguedadEnDias`). `0` = pago del día;
+  positivo = el movimiento es anterior, es decir pago viejo; negativo = el movimiento es posterior
+  (nunca viejo).
+- El veredicto (`tipo_cobro_derivado` + `fuente_derivacion = 'movimiento'` +
+  `revisar_clasificacion`) se **persiste al validar**; al revertir la validación se limpia. Si
+  difiere de la marca del cobrador, se levanta `revisar_clasificacion = true` **sin sobrescribir** lo
+  que puso el cobrador.
+- El umbral `cobro.umbral_antiguedad_dias` se lee como "**N días o más = viejo**" (`>=`, comparador
+  final aprobado por el dueño). Un pago sin movimiento vinculado no tiene veredicto: el reporte emite
+  `antiguedadDias: null` y `esViejo: false`.
+- El veredicto es **visible** en la bandeja de validación (columna «Antigüedad», con `—` en un
+  `pendiente` sin movimiento) y en el toast de validación (`Del día` / `Viejo (2 días)`).
+- La fecha del documento (`fechaDocumento`) ya **no** alimenta este veredicto: se conserva como
+  entrada opcional que solo usa la clasificación heredada al reportar.
 
 ### 8.4 Importación del Excel del banco
 
@@ -383,8 +397,8 @@ Fecha, monto (Bs y USD con tasa derivada), descripción, categoría, referencia 
 ## 10. API
 
 - Base: `http://localhost:4000/api`
-- Documentación base: `docs/openapi.yaml` (101 operaciones) y `docs/postman_collection.json`
-  (101 peticiones), que ya incluyen todos los grupos actuales. Los grupos de endpoints se resumen
+- Documentación base: `docs/openapi.yaml` (103 operaciones) y `docs/postman_collection.json`
+  (103 peticiones), que ya incluyen todos los grupos actuales. Los grupos de endpoints se resumen
   en la sección 10.1.
 - Todas las consultas de listado son **paginadas del lado del servidor**
   (`{ data, meta: { page, pageSize, total, totalPages } }`), con búsqueda y filtros por querystring.
@@ -467,8 +481,9 @@ Banca Amiga, con modelo multi-cuenta; tasa de referencia diaria cargada manualme
    y una sola llamada para todos los dropdowns.
 5. **Fechas de negocio como `DATE`**: ver sección 9.
 6. **Recuperación de contraseña sin email**: el token se retorna solo en desarrollo (ver sección 6).
-7. **`tipo_cobro_derivado`** solo se calcula si el cobrador informa la fecha del documento; sin
-   esa base no se marca discrepancia.
+7. **`tipo_cobro_derivado`** se deriva del movimiento bancario vinculado al validar (brecha
+   `fecha_pago` ↔ `fecha_ejecucion`), no de la fecha del documento; sin movimiento vinculado el
+   reporte no emite antigüedad y el veredicto queda `null`.
 8. **Soportes de gastos** se guardan en disco local (`uploads/`) y se sirven mediante
    `GET /api/uploads/:filename`, autenticado y autorizado por archivo (ver 13.1); el directorio
    `uploads/` ya **no** se expone públicamente. No hay almacenamiento externo. Los comprobantes de
@@ -546,9 +561,9 @@ lista de orígenes · bloqueo de cuenta tras N intentos fallidos · auditoría d
 | 10. Auditoría y pulido de UX | ✅ |
 | 11. Tipos de pago, notificaciones, tasa BCV, modo oscuro y móvil | ✅ |
 
-**Tests:** 71 tests unitarios en verde (cálculo de tasa, motor de conciliación —incluidas la
-re-evaluación del vínculo `evaluarVinculoConciliacion` y la detección de duplicados
-`coincideReferenciaMonto`—, parser de Excel, clasificación nuevo/viejo y parser de la respuesta
+**Tests:** 109 tests unitarios en verde en 10 archivos (cálculo de tasa, motor de conciliación
+—incluidas la re-evaluación del vínculo `evaluarVinculoConciliacion` y la detección de duplicados
+`coincideReferenciaMonto`—, parser de Excel, antigüedad pago ↔ movimiento y parser de la respuesta
 de la tasa BCV).
 
 **Datos de demostración:** `npm run seed:demo` genera ~30 días de actividad (pagos reportados,

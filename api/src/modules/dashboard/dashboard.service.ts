@@ -209,6 +209,12 @@ interface NuevoViejoRow {
   totalUsd: Prisma.Decimal | null;
 }
 
+/**
+ * New-vs-old split read from the PERSISTED movement-derived verdict: counts only
+ * validated payments with `fuente_derivacion = 'movimiento'`, grouped by
+ * `tipo_cobro_derivado`. A payment with no movement-derived verdict is EXCLUDED
+ * (neither nuevo nor viejo), never bucketed by the collector mark.
+ */
 export async function nuevoViejo(desde?: string, hasta?: string) {
   const hoy = hoyCaracas();
   const desdeFecha = desde ?? sumarDias(hoy, -29);
@@ -216,12 +222,13 @@ export async function nuevoViejo(desde?: string, hasta?: string) {
   const hastaExclusivo = sumarDias(hastaFecha, 1);
 
   const rows = await prisma.$queryRaw<NuevoViejoRow[]>(Prisma.sql`
-    SELECT COALESCE(tipo_cobro_derivado, tipo_cobro) AS tipo,
+    SELECT tipo_cobro_derivado AS tipo,
            COUNT(*) AS cantidad,
            COALESCE(SUM(monto_usd), 0) AS totalUsd
     FROM pagos_reportados
     WHERE estado = 'validado' AND fecha_pago >= ${desdeFecha} AND fecha_pago < ${hastaExclusivo}
-    GROUP BY COALESCE(tipo_cobro_derivado, tipo_cobro)
+      AND fuente_derivacion = 'movimiento'
+    GROUP BY tipo_cobro_derivado
   `);
 
   const vacio = { cantidad: 0, totalUsd: '0.00' };

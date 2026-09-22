@@ -75,7 +75,7 @@ solo el último valor; el histórico lo construye este backend.
 
 ## Endpoints
 
-- `../docs/openapi.yaml` — especificación OpenAPI 3.0.3 (101 operaciones)
+- `../docs/openapi.yaml` — especificación OpenAPI 3.0.3 (103 operaciones)
 - `../docs/postman_collection.json` — colección Postman con variables y auto-login
 - `../docs/schema.sql` — script SQL completo del esquema. Nota: es un artefacto derivado y puede
   quedar rezagado respecto de `schema.prisma` + `migrations/`, que son la fuente de verdad (ver
@@ -180,10 +180,12 @@ petición directa a `GET /uploads/...` responde **404** (se eliminó el `express
   rol, verificados en la base: Administrador **41**, Administrativo **20**, Consultor **10**,
   Cobrador **3**. El rol **Consultor** conserva `pagos.ver_todos`, pero es **estrictamente de solo
   lectura**: `pagos.ver_todos` no habilita ninguna ruta de escritura.
-- La alerta de **documento viejo** (`alertaAntiguedadDias`, en `serializePago`/`serializarPago`) es
-  un límite **de servidor**: exige `pagos.ver_alerta_antiguedad` (sembrado en Administrador vía
-  `ALL` y en Administrativo). Sin ese permiso el campo viaja siempre en `null` —nunca se resuelve
-  solo en el frontend— y el shape de la respuesta no cambia.
+- La **antigüedad** de un cobro (`antiguedadDias`/`esViejo` en el reporte de cobros) se calcula
+  contra la `fechaEjecucion` del **movimiento bancario vinculado**, no contra la fecha de documento:
+  la brecha entre la `fechaPago` reportada por el cobrador y la fecha del movimiento determina el
+  `tipoCobroDerivado` (`nuevo`/`viejo`), que se persiste al validar junto con `fuenteDerivacion`.
+  Sin movimiento vinculado el reporte emite `antiguedadDias: null` y `esViejo: false`; la antigua
+  alerta de documento viejo fue retirada.
 
 ### Validación de montos en pagos
 

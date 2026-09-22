@@ -5,6 +5,12 @@
  * meaningful data right after install: reported payments, reconciliations, bank
  * movements that nobody reported, expenses and daily reference rates.
  *
+ * Vintage distribution: every validated payment carries the movement-based
+ * verdict the API persists at validation time (`fuenteDerivacion = 'movimiento'`).
+ * Most reconciled movements execute the SAME day as the reported date (gap 0 ->
+ * `nuevo`), while a visible minority execute a few days EARLIER (gap > 0 ->
+ * `viejo`), so the "Nuevo vs viejo" chart and report show BOTH categories.
+ *
  * It is safe to run more than once: it skips if demo data is already present.
  *
  * Run with:  npx tsx prisma/seed-demo.ts
@@ -28,6 +34,10 @@ function rndDecimal(min: number, max: number, decimals = 2): Prisma.Decimal {
 
 const DIAS = 30;
 
+// Share of reconciled payments whose movement was executed BEFORE the reported
+// date, producing the `viejo` bucket. The rest close the same day (`nuevo`).
+const PROB_MOVIMIENTO_VIEJO = 0.3;
+
 async function main() {
   const yaHay = await prisma.pagoReportado.count();
   if (yaHay >= 20) {
@@ -46,6 +56,15 @@ async function main() {
 
   const admin = await prisma.usuario.findFirst({ where: { usuario: 'administrativo' } });
   const validadorId = admin?.id ?? (await prisma.usuario.findFirst())!.id;
+
+  // Same source the API reads (`getConfigValues` -> the `parametro` table). The
+  // demo only needs the raw tolerance to reproduce the verdict; the owner's
+  // configured value is 0, so any positive gap is old.
+  const parametroUmbral = await prisma.parametro.findFirst({
+    where: { clave: 'cobro.umbral_antiguedad_dias' },
+  });
+  const umbralParseado = Number(parametroUmbral?.valor);
+  const umbralDias = Number.isFinite(umbralParseado) ? umbralParseado : 0;
 
   const hoy = new Date();
   hoy.setUTCHours(0, 0, 0, 0);
@@ -91,7 +110,6 @@ async function main() {
       const referencia = String(++refCounter);
 
       const tipoCobro = rnd() > 0.35 ? TipoCobro.nuevo : TipoCobro.viejo;
-      const tipoCobroDerivado = tipoCobro;
 
       const estadoPago: EstadoPago = esReciente
         ? EstadoPago.pendiente
@@ -114,7 +132,12 @@ async function main() {
           cliente: clientes[rndInt(0, clientes.length - 1)],
           concepto: 'Cobro de servicio',
           tipoCobro,
-          tipoCobroDerivado,
+          // Report-time seed. Only a validated payment with a LINKED movement
+          // gets the movement verdict, written in the validated branch below.
+          // `reportarPago` derives at report time from an optional document
+          // date; the seed has none, so the derived value starts null.
+          tipoCobroDerivado: null,
+          fuenteDerivacion: 'reporte',
           revisarClasificacion: false,
           estado: estadoPago,
           validadoPor: estadoPago === EstadoPago.pendiente ? null : validadorId,
@@ -125,13 +148,25 @@ async function main() {
       pagosCreados++;
 
       if (estadoPago === EstadoPago.validado) {
+        // Vintage verdict, decided BEFORE the movement is written. A visible
+        // minority of reconciled movements execute a few days BEFORE the
+        // reported date (positive gap -> `viejo`); the rest the SAME day (gap 0
+        // -> `nuevo`). The gap is strictly above the configured threshold, so
+        // with the configured `0` it lands in the intended 2-5 day range.
+        // Shifting ONLY `fechaEjecucion` leaves `fechaPago`, `montoBs` and
+        // `referencia` untouched, so the seeded match stays valid.
+        const ejecutadoAntes = rnd() < PROB_MOVIMIENTO_VIEJO;
+        const gapDias = ejecutadoAntes ? umbralDias + rndInt(2, 5) : 0;
+        const fechaEjecucion = new Date(fecha);
+        fechaEjecucion.setUTCDate(fechaEjecucion.getUTCDate() - gapDias);
+
         // Create the matching bank movement and reconcile it.
         const movimiento = await prisma.movimientoBanco.create({
           data: {
             cuentaRecaudadoraId: cuenta.id,
             referencia,
             montoBs,
-            fechaEjecucion: fecha,
+            fechaEjecucion,
             estadoConciliacion: 'conciliado',
           },
         });
@@ -146,9 +181,23 @@ async function main() {
             diferenciaBs: new Prisma.Decimal(0),
           },
         });
+
+        // Same verdict the API persists at validation time. Mirrors
+        // `antiguedadEnDias` / `esPagoViejo` in src/lib/classification.ts.
+        const antiguedadDias = Math.floor(
+          (fecha.getTime() - fechaEjecucion.getTime()) / 86_400_000,
+        );
+        const tipoCobroDerivadoMov =
+          antiguedadDias > umbralDias ? TipoCobro.viejo : TipoCobro.nuevo;
+
         await prisma.pagoReportado.update({
           where: { id: pago.id },
-          data: { movimientoBancoId: movimiento.id },
+          data: {
+            movimientoBancoId: movimiento.id,
+            tipoCobroDerivado: tipoCobroDerivadoMov,
+            fuenteDerivacion: 'movimiento',
+            revisarClasificacion: tipoCobroDerivadoMov !== tipoCobro,
+          },
         });
       }
     }

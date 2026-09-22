@@ -103,7 +103,13 @@ usar un `<a href>` directo (el JWT vive en `localStorage` y lo agrega el interce
 ## Bandeja de validación y atajos
 
 Muestra el comprobante («Ver comprobante») y el tipo de pago del pago activo, y marca con un
-indicador las filas que tienen comprobante. Atajos (desactivados mientras se escribe en un campo):
+indicador las filas que tienen comprobante.
+
+- La bandeja incluye una columna **«Antigüedad»** con el veredicto persistido del pago contra el
+  movimiento bancario: `Del día` / `N días`, con `—` cuando el pago `pendiente` no tiene movimiento
+  vinculado. El toast de validación repite el veredicto (`Del día` / `Viejo (2 días)`).
+
+Atajos (desactivados mientras se escribe en un campo):
 
 | Tecla | Acción |
 |---|---|

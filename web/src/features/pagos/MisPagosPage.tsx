@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
-import { AlertaAntiguedadBadge, EstadoBadge, TipoCobroBadge } from './pago-utils';
+import { EstadoBadge, TipoCobroBadge } from './pago-utils';
 import { EditarPagoDialog } from './EditarPagoDialog';
 import { useToast } from '@/components/ui/toast';
 import type { PagoReportado } from '@/types';
@@ -31,7 +31,6 @@ export default function MisPagosPage() {
   const puedeEliminar = tiene('pagos.eliminar');
   const puedeReportar = tiene('pagos.reportar');
   const puedeEditarValidado = tiene('pagos.editar');
-  const puedeVerAlerta = tiene('pagos.ver_alerta_antiguedad');
 
   const [page, setPage] = useState(1);
   const [referencia, setReferencia] = useState('');
@@ -114,12 +113,6 @@ export default function MisPagosPage() {
         cell: ({ row }) => <TipoCobroBadge tipo={row.original.tipoCobroDerivado ?? row.original.tipoCobro} />,
       },
       {
-        id: 'alerta-antiguedad',
-        header: 'Antigüedad',
-        cell: ({ row }) =>
-          puedeVerAlerta ? <AlertaAntiguedadBadge dias={row.original.alertaAntiguedadDias} /> : null,
-      },
-      {
         id: 'estado',
         header: 'Estado',
         cell: ({ row }) => <EstadoBadge estado={row.original.estado} />,
@@ -160,7 +153,7 @@ export default function MisPagosPage() {
         },
       },
     ],
-    [puedeEliminar, puedeEditarPago, puedeVerAlerta],
+    [puedeEliminar, puedeEditarPago],
   );
 
   return (
@@ -249,7 +242,6 @@ export default function MisPagosPage() {
                   </dd>
                 </div>
               </dl>
-              {puedeVerAlerta && <AlertaAntiguedadBadge dias={row.alertaAntiguedadDias} />}
               {puedeEditarPago(row) && (
                 <Button
                   variant="outline"

@@ -39,7 +39,7 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ClearFiltersButton } from '@/components/common/ClearFiltersButton';
 import { FilePreviewDialog } from '@/components/common/FilePreviewDialog';
-import { AlertaAntiguedadBadge, EstadoBadge, TipoCobroBadge } from '@/features/pagos/pago-utils';
+import { AntiguedadVeredicto, descripcionVeredicto, EstadoBadge, TipoCobroBadge } from '@/features/pagos/pago-utils';
 import { EditarPagoDialog } from '@/features/pagos/EditarPagoDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -106,7 +106,6 @@ export default function ValidacionPage() {
   const puedeEliminar = tiene('pagos.eliminar');
   const puedeRevertir = tiene('pagos.revertir_validacion');
   const puedeEditar = tiene('pagos.editar');
-  const puedeVerAlerta = tiene('pagos.ver_alerta_antiguedad');
   const puedeEditarPago = (pago: PagoReportado) =>
     puedeEditar && (pago.estado === 'pendiente' || pago.estado === 'validado');
 
@@ -210,8 +209,8 @@ export default function ValidacionPage() {
   const validarMutation = useMutation({
     mutationFn: ({ id, movimientoBancoId }: { id: number; movimientoBancoId?: number }) =>
       validarPago(id, movimientoBancoId),
-    onSuccess: () => {
-      toast.success('Pago validado', 'El movimiento bancario quedó conciliado.');
+    onSuccess: (data) => {
+      toast.success('Pago validado', descripcionVeredicto(data));
       setActiveId(null);
       invalidar();
     },
@@ -477,10 +476,9 @@ export default function ValidacionPage() {
         cell: ({ row }) => <TipoCobroBadge tipo={row.original.tipoCobroDerivado ?? row.original.tipoCobro} />,
       },
       {
-        id: 'alerta-antiguedad',
+        id: 'antiguedad',
         header: 'Antigüedad',
-        cell: ({ row }) =>
-          puedeVerAlerta ? <AlertaAntiguedadBadge dias={row.original.alertaAntiguedadDias} /> : null,
+        cell: ({ row }) => <AntiguedadVeredicto pago={row.original} />,
       },
       {
         id: 'revisar',
@@ -501,7 +499,7 @@ export default function ValidacionPage() {
           ) : null,
       },
     ],
-    [puedeVerAlerta],
+    [],
   );
 
   return (
@@ -665,7 +663,10 @@ export default function ValidacionPage() {
                     </div>
                   </dl>
                   {row.revisarClasificacion && <Badge variant="warning">Revisar clasificación</Badge>}
-                  {puedeVerAlerta && <AlertaAntiguedadBadge dias={row.alertaAntiguedadDias} />}
+                  <div className="flex items-center gap-1 text-xs">
+                    <span className="text-muted-foreground">Antigüedad:</span>
+                    <AntiguedadVeredicto pago={row} />
+                  </div>
                   <p className="text-[11px] text-muted-foreground">
                     Toque la tarjeta para ver las coincidencias bancarias.
                   </p>

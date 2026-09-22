@@ -1772,7 +1772,7 @@
                 "pagos"
               ]
             },
-            "description": "Requiere permiso: pagos.reportar. Los montos montoBs y montoUsd deben ser estrictamente positivos: un valor no numerico, cero o negativo responde 400 \"El monto debe ser un numero positivo\".",
+            "description": "Requiere permiso: pagos.reportar. Los montos montoBs y montoUsd deben ser estrictamente positivos: un valor no numerico, cero o negativo responde 400 \"El monto debe ser un numero positivo\". El campo opcional fechaDocumento solo alimenta la clasificacion heredada al reportar; el veredicto de antiguedad que leen los reportes se determina y persiste al validar contra el movimiento bancario vinculado.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"fechaPago\": \"2026-09-19\",\n  \"fechaDocumento\": \"2026-08-01\",\n  \"referencia\": \"12345678\",\n  \"bancoOrigenId\": 1,\n  \"cuentaRecaudadoraId\": 1,\n  \"montoBs\": \"3600.00\",\n  \"montoUsd\": \"20.00\",\n  \"cliente\": \"Juan Perez\",\n  \"concepto\": \"Pago cuota mensual\",\n  \"tipoCobro\": \"nuevo\",\n  \"tipoPagoId\": 1,\n  \"observaciones\": \"Reportado en ruta\",\n  \"cobradorId\": 1\n}",

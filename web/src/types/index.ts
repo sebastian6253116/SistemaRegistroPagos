@@ -121,6 +121,10 @@ export interface PagoReportado {
   concepto: string | null;
   tipoCobro: TipoCobro;
   tipoCobroDerivado: TipoCobro | null;
+  // Origen del veredicto persistido: `reporte` (derivación al reportar, legado)
+  // o `movimiento` (derivado del movimiento bancario vinculado al validar).
+  // `null` u omitido cuando no hay veredicto derivado.
+  fuenteDerivacion?: 'reporte' | 'movimiento' | null;
   revisarClasificacion: boolean;
   observaciones: string | null;
   soporteUrl: string | null;
@@ -148,15 +152,13 @@ export interface PagoReportado {
     montoBs: string;
     fechaEjecucion: string;
   } | null;
-  // Alerta de "documento viejo": días de desfase entre la fecha del pago y la
-  // fecha de ejecución del movimiento bancario conciliado, cuando supera el
-  // umbral configurado (`cobro.umbral_antiguedad_dias`). `null` si no aplica.
-  alertaAntiguedadDias: number | null;
-  // Antigüedad del pago en días desde `fechaPago` hasta hoy (UTC). Solo lo emite
-  // el reporte `cobros`. Firmada: un pago con fecha futura da negativo.
-  antiguedadDias?: number;
-  // Marca "viejo" contra el mismo umbral configurado (estricto: igual al umbral
-  // NO es viejo). Solo lo emite el reporte `cobros`.
+  // Antigüedad en días entre `fechaPago` y la fecha de ejecución del movimiento
+  // bancario vinculado (veredicto persistido al validar). `null` cuando el pago
+  // no tiene veredicto por movimiento. Firmada: un movimiento anterior al pago
+  // da positivo. La emiten tanto `/pagos` como el reporte `cobros`.
+  antiguedadDias?: number | null;
+  // Marca "viejo" contra el umbral configurado (estricto: igual al umbral NO es
+  // viejo). Solo lo emite el reporte `cobros`.
   esViejo?: boolean;
   validador: { id: number; nombreCompleto: string } | null;
 }

@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { paginate, type PaginationParams } from '../../lib/http';
 import { desviacionPorcentual, tasaPromedioPonderada } from '../../lib/money';
-import { alertaAntiguedadDocumento, antiguedadEnDias, esPagoViejo } from '../../lib/classification';
+import { antiguedadEnDias, esPagoViejo } from '../../lib/classification';
 import { getConfigValues } from '../../lib/config-values';
 import { prisma } from '../../lib/prisma';
 import * as gastosService from '../gastos/gastos.service';
@@ -18,8 +18,10 @@ export interface ReportFilters {
   cobradorId?: number;
   bancoId?: number;
   estado?: EstadoPagoFiltro;
-  // Keeps only payments younger than N whole days, counted from today in UTC.
-  // Opt-in: only the `cobros` report applies it.
+  // Keeps only payments whose whole-day age against the LINKED bank movement is
+  // strictly less than N (`DATEDIFF(fecha_pago, fecha_ejecucion) < N`). A payment
+  // with no linked movement is EXCLUDED while the filter is active. Opt-in: only
+  // the `cobros` report applies it.
   antiguedadMaxDias?: number;
 }
 
@@ -42,21 +44,21 @@ function finDiaUTC(value?: string): Date | undefined {
 }
 
 /**
- * Start of TODAY in UTC (00:00:00.000). `fechaPago` is a DATE column, so both
- * sides of the "younger than N days" comparison are exact UTC midnights.
+ * Correlated EXISTS for the opt-in age filter: keeps payments whose whole-day
+ * age against the LINKED bank movement is strictly less than N, i.e.
+ * `DATEDIFF(p.fecha_pago, mb.fecha_ejecucion) < N`. Both sides are DATE columns,
+ * so `DATEDIFF` yields whole days and matches `antiguedadEnDias`'s floor
+ * semantics; the comparison is strict to match the "menor a N días" wording.
+ * A payment with NO linked movement is EXCLUDED: the correlated row does not
+ * exist, so the predicate is false. Shared by the raw-SQL path and by the
+ * Prisma path (which resolves the matching ids with it — see `idsConAntiguedad`).
  */
-function inicioHoyUTC(): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-}
-
-/**
- * Strict lower bound for the "younger than N days" rule: a payment is kept when
- * its whole-day age `(startOfTodayUTC - fechaPago) / 86_400_000` is < N, which
- * is exactly `fechaPago > startOfTodayUTC - N days`.
- */
-function limiteAntiguedadMaxDias(dias: number): Date {
-  return new Date(inicioHoyUTC().getTime() - dias * 86_400_000);
+function condicionAntiguedadSql(dias: number): Prisma.Sql {
+  return Prisma.sql`EXISTS (
+    SELECT 1 FROM movimientos_banco mb
+    WHERE mb.id = p.movimiento_banco_id
+      AND DATEDIFF(p.fecha_pago, mb.fecha_ejecucion) < ${dias}
+  )`;
 }
 
 function money(value: unknown): string {
@@ -84,15 +86,20 @@ const JOIN_PAGOS = Prisma.sql`
 /**
  * Builds the payment WHERE clause for the raw-SQL reports.
  *
- * `opciones.conFechaMovimiento` is OPT-IN and defaults to `false`: the bank
- * movement date range is supported ONLY by the `cobros` report (payments list),
- * so every other SQL report keeps its previous behaviour. While that opt-in
- * filter is active, a payment with NO linked movement is EXCLUDED.
+ * Every option is OPT-IN and defaults to `false`, so each SQL report keeps its
+ * previous behaviour unless it asks for more:
+ * - `conFechaMovimiento`: bank movement date range, supported ONLY by `cobros`.
+ * - `conAntiguedad`: movement-based age filter, supported ONLY by `cobros`
+ *   (the Prisma path resolves the ids and passes them along).
+ * - `soloFuenteMovimiento`: restricts to the persisted movement-derived verdict,
+ *   used by `nuevo-viejo`.
+ * While the movement date range or the age filter is active, a payment with NO
+ * linked movement is EXCLUDED.
  */
 function wherePagosSql(
   f: ReportFilters,
   estadoForzado?: string,
-  opciones?: { conFechaMovimiento?: boolean },
+  opciones?: { conFechaMovimiento?: boolean; conAntiguedad?: boolean; soloFuenteMovimiento?: boolean },
 ): Prisma.Sql {
   const conds: Prisma.Sql[] = [];
   const estado = estadoForzado ?? f.estado;
@@ -116,8 +123,37 @@ function wherePagosSql(
       Prisma.sql`EXISTS (SELECT 1 FROM movimientos_banco mb WHERE ${Prisma.join(movConds, ' AND ')})`,
     );
   }
+  // Opt-in age filter. Same discipline as the movement date range: a payment
+  // with NO linked movement is EXCLUDED (the correlated EXISTS is false).
+  if (opciones?.conAntiguedad && f.antiguedadMaxDias) {
+    conds.push(condicionAntiguedadSql(f.antiguedadMaxDias));
+  }
+  // Restricts to payments whose vintage verdict was derived from a linked bank
+  // movement. Used by `nuevo-viejo`: a payment with no movement-derived verdict
+  // is EXCLUDED (neither nuevo nor viejo), never bucketed by the collector mark.
+  if (opciones?.soloFuenteMovimiento) {
+    conds.push(Prisma.sql`p.fuente_derivacion = 'movimiento'`);
+  }
   if (conds.length === 0) conds.push(Prisma.sql`1 = 1`);
   return Prisma.sql`${Prisma.join(conds, ' AND ')}`;
+}
+
+/**
+ * Resolves the ids that satisfy the opt-in age filter, using the SAME raw EXISTS
+ * shape as `wherePagosSql`. The Prisma path cannot express a per-row column
+ * comparison against a relation, so `cobros` feeds these ids into its Prisma
+ * `WHERE id IN (...)`. A payment with NO linked movement yields no id here, so
+ * it is excluded while the filter is active.
+ */
+async function idsConAntiguedad(f: ReportFilters): Promise<number[]> {
+  const where = wherePagosSql(f, f.estado, {
+    conFechaMovimiento: true,
+    conAntiguedad: true,
+  });
+  const rows = await prisma.$queryRaw<{ id: number }[]>(Prisma.sql`
+    SELECT p.id FROM pagos_reportados p ${JOIN_PAGOS} WHERE ${where}
+  `);
+  return rows.map((r) => Number(r.id));
 }
 
 function whereGastosSql(f: ReportFilters): Prisma.Sql {
@@ -144,13 +180,13 @@ function whereGastosPrisma(f: ReportFilters): Prisma.GastoWhereInput {
 /**
  * Builds the Prisma WHERE for payment reports. `opciones.conFechaMovimiento` and
  * `opciones.conAntiguedad` are OPT-IN and default to `false`: only the `cobros`
- * report supports the bank movement date range and the "younger than N days"
- * age filter, so every other caller keeps its previous behaviour. While the
+ * report supports the bank movement date range and the movement-based age
+ * filter, so every other caller keeps its previous behaviour. While the
  * movement filter is active, a payment with NO linked movement is EXCLUDED.
  */
 function wherePagosPrisma(
   f: ReportFilters,
-  opciones?: { conFechaMovimiento?: boolean; conAntiguedad?: boolean },
+  opciones?: { conFechaMovimiento?: boolean; conAntiguedad?: boolean; idsAntiguedad?: number[] },
 ): Prisma.PagoReportadoWhereInput {
   const where: Prisma.PagoReportadoWhereInput = {};
   const desde = inicioDiaUTC(f.fechaDesde);
@@ -164,15 +200,14 @@ function wherePagosPrisma(
   if (f.cobradorId) where.cobradorId = f.cobradorId;
   if (f.bancoId) where.cuentaRecaudadora = { bancoId: f.bancoId };
   if (f.estado) where.estado = f.estado;
-  // Opt-in age filter: keep only payments whose whole-day age from today is
-  // strictly less than N (equivalent to `fechaPago > startOfTodayUTC - N days`).
-  // It composes with the Desde/Hasta range on the same `fechaPago` filter.
+  // Opt-in age filter. The rule is a per-row column comparison against a
+  // relation (`DATEDIFF(p.fecha_pago, mb.fecha_ejecucion) < N`), which Prisma's
+  // relation filters cannot express. The caller resolves the matching ids with
+  // the SAME raw EXISTS used by `wherePagosSql` (`idsConAntiguedad`) and passes
+  // them here; an empty list means "no payment matches", so a payment with NO
+  // linked movement is EXCLUDED exactly like in the SQL path.
   if (opciones?.conAntiguedad && f.antiguedadMaxDias) {
-    const fechaPago: Prisma.DateTimeFilter = {
-      ...(where.fechaPago as Prisma.DateTimeFilter | undefined),
-    };
-    fechaPago.gt = limiteAntiguedadMaxDias(f.antiguedadMaxDias);
-    where.fechaPago = fechaPago;
+    where.id = { in: opciones.idsAntiguedad ?? [] };
   }
   // Opt-in bank-movement date range (relation). When active, payments with NO
   // linked movement are EXCLUDED: a date filter on a relation must not silently
@@ -226,11 +261,7 @@ const pagoSelect = {
 
 type PagoDetalle = Prisma.PagoReportadoGetPayload<{ select: typeof pagoSelect }>;
 
-function serializarPago(
-  row: PagoDetalle,
-  umbralAntiguedadDias: number,
-  puedeVerAlertaAntiguedad: boolean,
-) {
+function serializarPago(row: PagoDetalle) {
   return {
     id: row.id,
     fechaPago: row.fechaPago,
@@ -248,15 +279,6 @@ function serializarPago(
     // Linked bank movement date (additive). `null` when the payment has no
     // linked movement. Emitted like `fechaPago` (raw Date; JSON serializes it).
     fechaMovimiento: row.movimientoBanco?.fechaEjecucion ?? null,
-    // Always present so the response shape stays stable; `null` when the caller
-    // lacks `pagos.ver_alerta_antiguedad` (server-side boundary).
-    alertaAntiguedadDias: puedeVerAlertaAntiguedad
-      ? alertaAntiguedadDocumento(
-          row.fechaPago,
-          row.movimientoBanco?.fechaEjecucion ?? null,
-          umbralAntiguedadDias,
-        )
-      : null,
   };
 }
 
@@ -264,13 +286,22 @@ function serializarPago(
  * "Antigüedad" fields, computed ON THE FLY for the `cobros` report only.
  *
  * Kept OUT of `serializarPago` on purpose: that serializer is shared with
- * `pagos-sin-respaldo`, which must not gain columns. The age is counted from
- * `fechaPago` to TODAY in UTC and the "viejo" flag uses the SAME threshold as
- * the old-document alert (`cobro.umbral_antiguedad_dias`), resolved ONCE per
- * request by the caller.
+ * `pagos-sin-respaldo`, which must not gain columns. The age is the signed
+ * whole-day gap between the collector-reported `fechaPago` and the LINKED bank
+ * movement's `fechaEjecucion`; the "viejo" flag uses the tolerance threshold
+ * (`cobro.umbral_antiguedad_dias`), resolved ONCE per request by the caller.
+ * With no linked movement the row emits `antiguedadDias: null` and
+ * `esViejo: false`.
  */
-function camposAntiguedad(fechaPago: Date, umbralAntiguedadDias: number, hoyUTC: Date) {
-  const antiguedadDias = antiguedadEnDias(fechaPago, hoyUTC);
+function camposAntiguedad(
+  fechaPago: Date,
+  fechaEjecucionMovimiento: Date | null,
+  umbralAntiguedadDias: number,
+) {
+  if (!fechaEjecucionMovimiento) {
+    return { antiguedadDias: null, esViejo: false };
+  }
+  const antiguedadDias = antiguedadEnDias(fechaPago, fechaEjecucionMovimiento);
   return {
     antiguedadDias,
     esViejo: esPagoViejo(antiguedadDias, umbralAntiguedadDias),
@@ -281,15 +312,16 @@ function camposAntiguedad(fechaPago: Date, umbralAntiguedadDias: number, hoyUTC:
 // 1. Cobros por periodo (detalle + consolidado)
 // ---------------------------------------------------------------------------
 
-export async function cobros(
-  f: ReportFilters,
-  params: PaginationParams,
-  puedeVerAlertaAntiguedad = false,
-) {
-  // Only this report opts into the bank-movement date and the age filters.
-  const where = wherePagosPrisma(f, { conFechaMovimiento: true, conAntiguedad: true });
-  // Resolved ONCE per request and reused for every row.
-  const hoyUTC = inicioHoyUTC();
+export async function cobros(f: ReportFilters, params: PaginationParams) {
+  // Only this report opts into the bank-movement date and the age filters. The
+  // age filter is resolved to a set of ids first because Prisma cannot express
+  // the per-row DATEDIFF; `idsConAntiguedad` runs the SAME raw EXISTS.
+  const where = wherePagosPrisma(f, {
+    conFechaMovimiento: true,
+    conAntiguedad: true,
+    idsAntiguedad: f.antiguedadMaxDias ? await idsConAntiguedad(f) : undefined,
+  });
+  // Config resolved ONCE per request and reused for every row.
   const [rows, total, agg, config] = await Promise.all([
     prisma.pagoReportado.findMany({
       where,
@@ -310,8 +342,12 @@ export async function cobros(
   return {
     ...paginate(
       rows.map((r) => ({
-        ...serializarPago(r, config.umbralAntiguedadDias, puedeVerAlertaAntiguedad),
-        ...camposAntiguedad(r.fechaPago, config.umbralAntiguedadDias, hoyUTC),
+        ...serializarPago(r),
+        ...camposAntiguedad(
+          r.fechaPago,
+          r.movimientoBanco?.fechaEjecucion ?? null,
+          config.umbralAntiguedadDias,
+        ),
       })),
       total,
       params,
@@ -406,7 +442,11 @@ interface NuevoViejoDiaRow {
 }
 
 export async function nuevoViejo(f: ReportFilters, params: PaginationParams) {
-  const where = wherePagosSql(f, f.estado ?? 'validado');
+  // Read the PERSISTED movement-derived verdict, not the collector's mark: group
+  // by `tipo_cobro_derivado` and restrict to rows derived from a linked movement.
+  // A payment with no movement-derived verdict is EXCLUDED (neither nuevo nor
+  // viejo); it is never bucketed by `tipo_cobro`.
+  const where = wherePagosSql(f, f.estado ?? 'validado', { soloFuenteMovimiento: true });
 
   const [resumenRows, evolucion, total] = await Promise.all([
     prisma.$queryRaw<NuevoViejoResumenRow[]>(Prisma.sql`
@@ -416,22 +456,22 @@ export async function nuevoViejo(f: ReportFilters, params: PaginationParams) {
              montoBs,
              ROUND(100 * montoUsd / NULLIF(SUM(montoUsd) OVER (), 0), 2) AS participacionPct
       FROM (
-        SELECT COALESCE(p.tipo_cobro_derivado, p.tipo_cobro) AS tipo,
+        SELECT p.tipo_cobro_derivado AS tipo,
                COUNT(*) AS cantidad,
                COALESCE(SUM(p.monto_usd), 0) AS montoUsd,
                COALESCE(SUM(p.monto_bs), 0) AS montoBs
         FROM pagos_reportados p
         ${JOIN_PAGOS}
         WHERE ${where}
-        GROUP BY COALESCE(p.tipo_cobro_derivado, p.tipo_cobro)
+        GROUP BY p.tipo_cobro_derivado
       ) t
     `),
     prisma.$queryRaw<NuevoViejoDiaRow[]>(Prisma.sql`
       SELECT DATE_FORMAT(p.fecha_pago, '%Y-%m-%d') AS fecha,
-             COALESCE(SUM(CASE WHEN COALESCE(p.tipo_cobro_derivado, p.tipo_cobro) = 'nuevo' THEN p.monto_usd ELSE 0 END), 0) AS nuevoUsd,
-             COALESCE(SUM(CASE WHEN COALESCE(p.tipo_cobro_derivado, p.tipo_cobro) = 'viejo' THEN p.monto_usd ELSE 0 END), 0) AS viejoUsd,
-             SUM(CASE WHEN COALESCE(p.tipo_cobro_derivado, p.tipo_cobro) = 'nuevo' THEN 1 ELSE 0 END) AS nuevoCantidad,
-             SUM(CASE WHEN COALESCE(p.tipo_cobro_derivado, p.tipo_cobro) = 'viejo' THEN 1 ELSE 0 END) AS viejoCantidad
+             COALESCE(SUM(CASE WHEN p.tipo_cobro_derivado = 'nuevo' THEN p.monto_usd ELSE 0 END), 0) AS nuevoUsd,
+             COALESCE(SUM(CASE WHEN p.tipo_cobro_derivado = 'viejo' THEN p.monto_usd ELSE 0 END), 0) AS viejoUsd,
+             SUM(CASE WHEN p.tipo_cobro_derivado = 'nuevo' THEN 1 ELSE 0 END) AS nuevoCantidad,
+             SUM(CASE WHEN p.tipo_cobro_derivado = 'viejo' THEN 1 ELSE 0 END) AS viejoCantidad
       FROM pagos_reportados p
       ${JOIN_PAGOS}
       WHERE ${where}
@@ -731,17 +771,13 @@ export async function movimientosNoConciliados(f: ReportFilters, params: Paginat
 // 7. Pagos reportados sin respaldo bancario
 // ---------------------------------------------------------------------------
 
-export async function pagosSinRespaldo(
-  f: ReportFilters,
-  params: PaginationParams,
-  puedeVerAlertaAntiguedad = false,
-) {
+export async function pagosSinRespaldo(f: ReportFilters, params: PaginationParams) {
   const where: Prisma.PagoReportadoWhereInput = {
     ...wherePagosPrisma(f),
     movimientoBancoId: null,
   };
 
-  const [rows, total, config] = await Promise.all([
+  const [rows, total] = await Promise.all([
     prisma.pagoReportado.findMany({
       where,
       select: pagoSelect,
@@ -750,14 +786,9 @@ export async function pagosSinRespaldo(
       take: params.take,
     }),
     prisma.pagoReportado.count({ where }),
-    getConfigValues(),
   ]);
 
-  return paginate(
-    rows.map((r) => serializarPago(r, config.umbralAntiguedadDias, puedeVerAlertaAntiguedad)),
-    total,
-    params,
-  );
+  return paginate(rows.map((r) => serializarPago(r)), total, params);
 }
 
 // ---------------------------------------------------------------------------
@@ -985,19 +1016,14 @@ const TITULOS: Record<TipoReporte, string> = {
 /**
  * Builds the export payload by REUSING the same query functions that back the
  * JSON endpoints; only the pagination window changes (all rows).
- *
- * `puedeVerAlertaAntiguedad` is threaded into the pago-backed blocks so an
- * authorized user's export carries the alert and an unauthorized user's does
- * not, exactly like the JSON endpoints (server-side gate at the controller).
  */
 export async function datosParaExport(
   tipo: TipoReporte,
   f: ReportFilters,
-  puedeVerAlertaAntiguedad = false,
 ): Promise<ReporteExportable> {
   switch (tipo) {
     case 'cobros': {
-      const r = await cobros(f, SIN_LIMITE, puedeVerAlertaAntiguedad);
+      const r = await cobros(f, SIN_LIMITE);
       return {
         titulo: TITULOS[tipo],
         bloques: [
@@ -1012,7 +1038,6 @@ export async function datosParaExport(
               { key: 'montoBs', label: 'Monto Bs', align: 'right' },
               { key: 'montoUsd', label: 'Monto USD', align: 'right' },
               { key: 'tasa', label: 'Tasa', align: 'right' },
-              { key: 'alertaAntiguedad', label: 'Alerta antigüedad' },
               { key: 'antiguedad', label: 'Antigüedad' },
               { key: 'viejo', label: 'Viejo' },
               { key: 'estado', label: 'Estado' },
@@ -1022,9 +1047,8 @@ export async function datosParaExport(
               ...row,
               cobradorNombre: row.cobrador?.nombre ?? '',
               banco: row.cuentaRecaudadora?.banco?.nombre ?? '',
-              alertaAntiguedad:
-                row.alertaAntiguedadDias != null ? `${row.alertaAntiguedadDias} días` : '',
-              antiguedad: `${row.antiguedadDias} días`,
+              // No linked movement => no age to show (empty cell, not "null días").
+              antiguedad: row.antiguedadDias != null ? `${row.antiguedadDias} días` : '',
               viejo: row.esViejo ? 'Sí' : '',
             })),
           },
@@ -1165,7 +1189,7 @@ export async function datosParaExport(
       };
     }
     case 'pagos-sin-respaldo': {
-      const r = await pagosSinRespaldo(f, SIN_LIMITE, puedeVerAlertaAntiguedad);
+      const r = await pagosSinRespaldo(f, SIN_LIMITE);
       return {
         titulo: TITULOS[tipo],
         bloques: [

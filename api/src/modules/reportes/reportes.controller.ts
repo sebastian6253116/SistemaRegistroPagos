@@ -18,19 +18,9 @@ function filtrosDe(req: Request): ReportFilters {
   };
 }
 
-/**
- * Server-side gate for the "old document" alert. `authenticate` runs at the
- * router level so `req.user` is set; default to `false` (fail closed) otherwise.
- */
-function puedeVerAlertaAntiguedad(req: Request): boolean {
-  return req.user?.permisos.includes('pagos.ver_alerta_antiguedad') ?? false;
-}
-
 export const cobros = asyncHandler(async (req: Request, res: Response) => {
   const params = parsePagination(req.query as Record<string, unknown>);
-  res.json(
-    await service.cobros(filtrosDe(req), params, puedeVerAlertaAntiguedad(req)),
-  );
+  res.json(await service.cobros(filtrosDe(req), params));
 });
 
 export const porCobrador = asyncHandler(async (req: Request, res: Response) => {
@@ -60,9 +50,7 @@ export const movimientosNoConciliados = asyncHandler(async (req: Request, res: R
 
 export const pagosSinRespaldo = asyncHandler(async (req: Request, res: Response) => {
   const params = parsePagination(req.query as Record<string, unknown>);
-  res.json(
-    await service.pagosSinRespaldo(filtrosDe(req), params, puedeVerAlertaAntiguedad(req)),
-  );
+  res.json(await service.pagosSinRespaldo(filtrosDe(req), params));
 });
 
 export const flujoCaja = asyncHandler(async (req: Request, res: Response) => {
@@ -118,7 +106,7 @@ export const exportar = asyncHandler(async (req: Request, res: Response) => {
     antiguedadMaxDias: q.antiguedadMaxDias,
   };
 
-  const reporte = await service.datosParaExport(tipo, filtros, puedeVerAlertaAntiguedad(req));
+  const reporte = await service.datosParaExport(tipo, filtros);
 
   if (q.formato === 'pdf') {
     const doc = service.generarPdf(reporte.titulo, subtitulo(tipo, filtros), reporte.bloques);

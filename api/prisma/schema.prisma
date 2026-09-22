@@ -209,6 +209,14 @@ enum TipoConciliacion {
   manual
 }
 
+// Records WHY `tipoCobroDerivado` holds its value:
+// - `reporte`: legacy/collector-time derivation (from the reported document date);
+// - `movimiento`: derived from the linked bank movement at validation time.
+enum FuenteDerivacion {
+  reporte
+  movimiento
+}
+
 model PagoReportado {
   id                  Int      @id @default(autoincrement())
   cobradorId          Int      @map("cobrador_id")
@@ -229,8 +237,11 @@ model PagoReportado {
   tipoCobro            TipoCobro  @map("tipo_cobro")
   // Derived vintage classification. Kept separate from the collector's mark so
   // a mismatch can be flagged for review without overwriting the user input.
-  tipoCobroDerivado    TipoCobro? @map("tipo_cobro_derivado")
-  revisarClasificacion Boolean    @default(false) @map("revisar_clasificacion")
+  tipoCobroDerivado    TipoCobro?       @map("tipo_cobro_derivado")
+  // Why `tipoCobroDerivado` holds its value: `reporte` = legacy/collector-time
+  // derivation, `movimiento` = derived from the bank movement at validation.
+  fuenteDerivacion     FuenteDerivacion? @map("fuente_derivacion")
+  revisarClasificacion Boolean          @default(false) @map("revisar_clasificacion")
   observaciones        String?    @db.Text
 
   estado            EstadoPago @default(pendiente)

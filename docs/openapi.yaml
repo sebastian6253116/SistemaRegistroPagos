@@ -3625,11 +3625,16 @@ paths:
       operationId: reporteCobros
       summary: Reporte de cobros
       description: >-
-        Requiere permiso: reportes.ver. Cada fila incluye `alertaAntiguedadDias`
-        (alerta de "documento viejo" contra el movimiento bancario conciliado),
-        resuelta con el parametro `cobro.umbral_antiguedad_dias`. El valor solo se
-        calcula si el usuario tiene el permiso `pagos.ver_alerta_antiguedad`; sin
-        el, el campo viaja como `null` (limite de servidor, no solo de UI).
+        Requiere permiso: reportes.ver. Cada fila expone el veredicto de
+        antiguedad PERSISTIDO al validar: `tipoCobroDerivado` (nuevo/viejo),
+        `fuenteDerivacion` (`movimiento` cuando el cobro se valido contra un
+        movimiento bancario) y `antiguedadDias`, la brecha firmada en dias
+        completos entre la `fechaPago` reportada y la `fechaEjecucion` del
+        movimiento vinculado (0 = mismo dia; positivo = movimiento anterior =
+        pago viejo). El umbral `cobro.umbral_antiguedad_dias` se lee como
+        "N dias o mas = viejo" (`>=`). Cada fila de `cobros` agrega ademas
+        `fechaMovimiento` y `esViejo`. Sin movimiento vinculado la fila emite
+        `antiguedadDias: null`, `esViejo: false` y el veredicto puede ser `null`.
       parameters:
         - $ref: '#/components/parameters/PageQuery'
         - $ref: '#/components/parameters/PageSizeQuery'
@@ -4442,7 +4447,12 @@ components:
           example: '2026-09-19'
         fechaDocumento:
           type: string
-          description: Fecha del documento/usado para clasificar antiguedad (opcional)
+          description: >-
+            Fecha del documento (opcional). Alimenta solo la clasificacion
+            heredada que se calcula al reportar (`clasificarPorAntiguedad`,
+            contra la fecha de pago y el umbral `cobro.umbral_antiguedad_dias`);
+            NO determina el veredicto de antiguedad que leen los reportes: ese se
+            deriva del movimiento bancario vinculado al validar.
           example: '2026-08-01'
         referencia: { type: string, maxLength: 60, example: '12345678' }
         bancoOrigenId:
@@ -4498,6 +4508,17 @@ components:
         soporteUrl: { type: string, nullable: true, example: /uploads/1699999999999-comprobante.pdf }
         tipoCobro: { type: string, enum: [nuevo, viejo], example: nuevo }
         tipoCobroDerivado: { type: string, enum: [nuevo, viejo], nullable: true, example: nuevo }
+        fuenteDerivacion:
+          type: string
+          enum: [reporte, movimiento]
+          nullable: true
+          description: >-
+            Origen del veredicto de antiguedad persistido. `movimiento` cuando se
+            determino al validar contra el movimiento bancario vinculado
+            (`tipoCobroDerivado`); `reporte` cuando proviene de la clasificacion
+            al reportar con `fechaDocumento`; `null` sin veredicto (pago
+            pendiente o validacion revertida).
+          example: movimiento
         revisarClasificacion: { type: boolean, example: false }
         observaciones: { type: string, nullable: true, example: null }
         estado: { type: string, enum: [pendiente, validado, rechazado, duplicado], example: pendiente }
@@ -4551,17 +4572,17 @@ components:
             referencia: { type: string, example: '12345678' }
             montoBs: { type: string, example: '3600.00' }
             fechaEjecucion: { type: string, format: date-time, example: '2026-09-19T00:00:00.000Z' }
-        alertaAntiguedadDias:
+        antiguedadDias:
           type: integer
           nullable: true
           description: >-
-            Alerta de "documento viejo". Dias enteros (periodos completos de 24h)
-            cuando la fecha de ejecucion del movimiento bancario conciliado es
-            POSTERIOR a la fecha del pago por mas de `cobro.umbral_antiguedad_dias`;
-            `null` cuando no hay movimiento vinculado o el desfase esta dentro del
-            umbral (exactamente el umbral NO se marca). Requiere el permiso
-            `pagos.ver_alerta_antiguedad`: sin el, el campo siempre es `null`.
-          example: 45
+            Brecha firmada en dias completos entre la `fechaPago` reportada y la
+            `fechaEjecucion` del movimiento bancario vinculado (0 = mismo dia;
+            positivo = movimiento anterior = pago viejo; negativo = movimiento
+            posterior). Se persiste con el veredicto al validar y solo viaja
+            cuando el veredicto proviene del movimiento
+            (`fuenteDerivacion = movimiento`); en cualquier otro caso es `null`.
+          example: 2
         validador:
           type: object
           nullable: true

@@ -1,7 +1,6 @@
 import { TipoCobro } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 import {
-  alertaAntiguedadDocumento,
   antiguedadEnDias,
   clasificarPorAntiguedad,
   esPagoViejo,
@@ -40,78 +39,55 @@ describe('requiereRevision (spec 5.3: never overwrite the collector mark)', () =
   });
 });
 
-describe('alertaAntiguedadDocumento (old document vs. bank movement)', () => {
-  const umbral = 30;
+describe('antiguedadEnDias (gap between fechaPago and movement fechaEjecucion)', () => {
+  const fechaPago = new Date('2026-09-21T00:00:00.000Z');
 
-  it('returns null when the gap is below the threshold', () => {
-    const pago = new Date('2026-09-01T00:00:00.000Z');
-    const movimiento = new Date('2026-10-01T00:00:00.000Z'); // 30 days
-    expect(alertaAntiguedadDocumento(pago, new Date('2026-09-30T00:00:00.000Z'), umbral)).toBeNull();
-    // Boundary: exactly the threshold is NOT flagged (strictly greater is old).
-    expect(alertaAntiguedadDocumento(pago, movimiento, umbral)).toBeNull();
+  it('returns 0 when the payment and the movement are the same day', () => {
+    expect(antiguedadEnDias(fechaPago, new Date('2026-09-21T00:00:00.000Z'))).toBe(0);
   });
 
-  it('returns the day gap when the movement is MORE than the threshold days later', () => {
-    const pago = new Date('2026-09-01T00:00:00.000Z');
-    const movimiento = new Date('2026-10-02T00:00:00.000Z'); // 31 days
-    expect(alertaAntiguedadDocumento(pago, movimiento, umbral)).toBe(31);
+  it('returns 1 when the movement happened 1 day earlier', () => {
+    expect(antiguedadEnDias(fechaPago, new Date('2026-09-20T00:00:00.000Z'))).toBe(1);
   });
 
-  it('uses whole-day (complete 24h) periods for the gap', () => {
-    const pago = new Date('2026-09-01T00:00:00.000Z');
-    const movimiento = new Date('2026-10-02T12:00:00.000Z'); // 31.5 days
-    expect(alertaAntiguedadDocumento(pago, movimiento, umbral)).toBe(31);
+  it('returns 2 when the movement happened 2 days earlier', () => {
+    expect(antiguedadEnDias(fechaPago, new Date('2026-09-19T00:00:00.000Z'))).toBe(2);
   });
 
-  it('returns null when the movement date is missing', () => {
-    const pago = new Date('2026-09-01T00:00:00.000Z');
-    expect(alertaAntiguedadDocumento(pago, null, umbral)).toBeNull();
-    expect(alertaAntiguedadDocumento(pago, undefined, umbral)).toBeNull();
-  });
-
-  it('returns null when the payment date is missing', () => {
-    const movimiento = new Date('2026-10-02T00:00:00.000Z');
-    expect(alertaAntiguedadDocumento(null, movimiento, umbral)).toBeNull();
-  });
-
-  it('does not flag a movement on or before the payment date', () => {
-    const pago = new Date('2026-09-01T00:00:00.000Z');
-    expect(alertaAntiguedadDocumento(pago, new Date('2026-08-20T00:00:00.000Z'), umbral)).toBeNull();
+  it('returns a negative value when the movement is later than the reported date (kept signed)', () => {
+    expect(antiguedadEnDias(fechaPago, new Date('2026-09-24T00:00:00.000Z'))).toBe(-3);
   });
 });
 
-describe('antiguedadEnDias (días desde fechaPago hasta hoy, UTC)', () => {
-  const hoy = new Date('2026-09-21T00:00:00.000Z');
-
-  it('counts the whole days elapsed', () => {
-    expect(antiguedadEnDias(new Date('2026-09-11T00:00:00.000Z'), hoy)).toBe(10);
+describe('esPagoViejo (a gap of the threshold or more is old)', () => {
+  it('treats a threshold of 0 as "everything is old", including a same-day payment', () => {
+    // Documented edge case introduced by `>=`: 0 >= 0 is true. The owner's
+    // production value is 1, so this only surfaces if the threshold is set to 0.
+    expect(esPagoViejo(0, 0)).toBe(true);
+    expect(esPagoViejo(1, 0)).toBe(true);
+    expect(esPagoViejo(2, 0)).toBe(true);
   });
 
-  it('returns 0 for a payment dated today', () => {
-    expect(antiguedadEnDias(new Date('2026-09-21T00:00:00.000Z'), hoy)).toBe(0);
+  it('does not flag a same-day payment with the owner threshold of 1', () => {
+    expect(esPagoViejo(0, 1)).toBe(false);
   });
 
-  it('returns a negative value for a future-dated payment (kept signed)', () => {
-    expect(antiguedadEnDias(new Date('2026-09-24T00:00:00.000Z'), hoy)).toBe(-3);
-  });
-});
-
-describe('esPagoViejo (strict threshold)', () => {
-  const umbral = 30;
-
-  it('does not flag an age below the threshold', () => {
-    expect(esPagoViejo(29, umbral)).toBe(false);
+  it('flags a 1-day gap with the owner threshold of 1', () => {
+    expect(esPagoViejo(1, 1)).toBe(true);
   });
 
-  it('does not flag an age exactly at the threshold', () => {
-    expect(esPagoViejo(30, umbral)).toBe(false);
+  it('flags a 2-day gap with a threshold of 1', () => {
+    expect(esPagoViejo(2, 1)).toBe(true);
   });
 
-  it('flags an age above the threshold', () => {
-    expect(esPagoViejo(31, umbral)).toBe(true);
+  it('never flags a negative gap (movement executed after the reported date)', () => {
+    expect(esPagoViejo(-1, 0)).toBe(false);
+    expect(esPagoViejo(-1, 1)).toBe(false);
+    expect(esPagoViejo(-3, 1)).toBe(false);
   });
 
-  it('never flags a negative age', () => {
-    expect(esPagoViejo(-1, umbral)).toBe(false);
+  it('flags exactly the threshold as old and one day below it as not old', () => {
+    expect(esPagoViejo(30, 30)).toBe(true);
+    expect(esPagoViejo(29, 30)).toBe(false);
   });
 });

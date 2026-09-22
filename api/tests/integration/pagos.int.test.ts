@@ -35,6 +35,7 @@ import {
   type SeedRefs,
 } from './helpers';
 import { pagoCasReconciliacionWhere } from '../../src/modules/pagos/optimistic-lock';
+import { getConfigValues } from '../../src/lib/config-values';
 
 let ctx: SeedRefs;
 
@@ -282,5 +283,172 @@ describe('PUT /api/pagos/:id - input validation', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('validation_error');
+  });
+});
+
+describe('POST /api/pagos/:id/validar - persisted movement-derived verdict (CR-005)', () => {
+  // Fixed reference day at UTC midnight so no assertion depends on "today".
+  const DIA = new Date('2026-03-10T00:00:00.000Z');
+  const haceDias = (dias: number) => new Date(DIA.getTime() - dias * 86_400_000);
+
+  it('persists "viejo" + fuenteDerivacion="movimiento" when the movement is older than the threshold', async () => {
+    const token = await tokenPara('admin');
+    // The effective threshold comes from the seeded `cobro.umbral_antiguedad_dias`
+    // parameter (read, never mutated). The gap starts two days PAST it so the
+    // payment is unambiguously old regardless of the configured value.
+    const { umbralAntiguedadDias } = await getConfigValues();
+    const gap = umbralAntiguedadDias + 2;
+    const referencia = refUnica();
+
+    const movimiento = await crearMovimiento({
+      cuentaRecaudadoraId: ctx.cuentaRecaudadoraId,
+      referencia,
+      montoBs: '100.00',
+      fecha: haceDias(gap),
+    });
+    const pago = await crearPago(basePago({ referencia, montoBs: '100.00', fecha: DIA }));
+
+    const res = await request(app)
+      .post(`/api/pagos/${pago.id}/validar`)
+      .set(bearer(token))
+      .send({ movimientoBancoId: movimiento.id });
+
+    expect(res.status).toBe(200);
+    expect(res.body.tipoCobroDerivado).toBe('viejo');
+    expect(res.body.fuenteDerivacion).toBe('movimiento');
+    expect(res.body.antiguedadDias).toBe(gap);
+
+    // Persistence is the point of the change: assert the DB directly.
+    const pagoDb = await prisma.pagoReportado.findUniqueOrThrow({ where: { id: pago.id } });
+    expect(pagoDb.estado).toBe('validado');
+    expect(pagoDb.tipoCobroDerivado).toBe('viejo');
+    expect(pagoDb.fuenteDerivacion).toBe('movimiento');
+    expect(pagoDb.revisarClasificacion).toBe(true);
+
+    // Additive field reaches the list endpoint the web actually consumes.
+    const listado = await request(app)
+      .get('/api/pagos')
+      .set(bearer(token))
+      .query({ referencia });
+    expect(listado.status).toBe(200);
+    const fila = listado.body.data.find((p: { id: number }) => p.id === pago.id);
+    expect(fila.antiguedadDias).toBe(gap);
+  });
+
+  it('derives the same-day verdict (gap 0) from the effective threshold', async () => {
+    const token = await tokenPara('admin');
+    const referencia = refUnica();
+
+    // The effective threshold is READ, never assumed. With `>=`, gap 0 is NOT
+    // old only while the threshold is > 0; if it were configured as 0, a
+    // same-day movement would be old. Deriving the expectation from the live
+    // threshold keeps this test correct either way.
+    const { umbralAntiguedadDias } = await getConfigValues();
+    const tipoEsperado = 0 >= umbralAntiguedadDias ? 'viejo' : 'nuevo';
+
+    const movimiento = await crearMovimiento({
+      cuentaRecaudadoraId: ctx.cuentaRecaudadoraId,
+      referencia,
+      montoBs: '100.00',
+      fecha: DIA,
+    });
+    const pago = await crearPago(basePago({ referencia, montoBs: '100.00', fecha: DIA }));
+
+    const res = await request(app)
+      .post(`/api/pagos/${pago.id}/validar`)
+      .set(bearer(token))
+      .send({ movimientoBancoId: movimiento.id });
+
+    expect(res.status).toBe(200);
+    expect(res.body.tipoCobroDerivado).toBe(tipoEsperado);
+    expect(res.body.fuenteDerivacion).toBe('movimiento');
+    expect(res.body.antiguedadDias).toBe(0);
+
+    const pagoDb = await prisma.pagoReportado.findUniqueOrThrow({ where: { id: pago.id } });
+    expect(pagoDb.tipoCobroDerivado).toBe(tipoEsperado);
+    expect(pagoDb.fuenteDerivacion).toBe('movimiento');
+    // The collector's mark defaults to 'nuevo'; the flag is a mismatch check.
+    expect(pagoDb.revisarClasificacion).toBe(tipoEsperado !== 'nuevo');
+  });
+
+  it('treats exactly the threshold as old and one day below it as not old', async () => {
+    const token = await tokenPara('admin');
+    const { umbralAntiguedadDias } = await getConfigValues();
+
+    // Exactly at the threshold -> "viejo" (the rule is now "N or more").
+    const refBorde = refUnica();
+    const movBorde = await crearMovimiento({
+      cuentaRecaudadoraId: ctx.cuentaRecaudadoraId,
+      referencia: refBorde,
+      montoBs: '100.00',
+      fecha: haceDias(umbralAntiguedadDias),
+    });
+    const pagoBorde = await crearPago(
+      basePago({ referencia: refBorde, montoBs: '100.00', fecha: DIA }),
+    );
+    const resBorde = await request(app)
+      .post(`/api/pagos/${pagoBorde.id}/validar`)
+      .set(bearer(token))
+      .send({ movimientoBancoId: movBorde.id });
+    expect(resBorde.status).toBe(200);
+    expect(resBorde.body.antiguedadDias).toBe(umbralAntiguedadDias);
+    expect(resBorde.body.tipoCobroDerivado).toBe('viejo');
+
+    // One day BELOW the threshold -> "nuevo".
+    const refBajo = refUnica();
+    const movBajo = await crearMovimiento({
+      cuentaRecaudadoraId: ctx.cuentaRecaudadoraId,
+      referencia: refBajo,
+      montoBs: '100.00',
+      fecha: haceDias(umbralAntiguedadDias - 1),
+    });
+    const pagoBajo = await crearPago(
+      basePago({ referencia: refBajo, montoBs: '100.00', fecha: DIA }),
+    );
+    const resBajo = await request(app)
+      .post(`/api/pagos/${pagoBajo.id}/validar`)
+      .set(bearer(token))
+      .send({ movimientoBancoId: movBajo.id });
+    expect(resBajo.status).toBe(200);
+    expect(resBajo.body.antiguedadDias).toBe(umbralAntiguedadDias - 1);
+    expect(resBajo.body.tipoCobroDerivado).toBe('nuevo');
+  });
+
+  it('clears the verdict when the validation is reverted', async () => {
+    const token = await tokenPara('admin');
+    const { umbralAntiguedadDias } = await getConfigValues();
+    const referencia = refUnica();
+
+    const movimiento = await crearMovimiento({
+      cuentaRecaudadoraId: ctx.cuentaRecaudadoraId,
+      referencia,
+      montoBs: '100.00',
+      fecha: haceDias(umbralAntiguedadDias + 2),
+    });
+    const pago = await crearPago(basePago({ referencia, montoBs: '100.00', fecha: DIA }));
+
+    await request(app)
+      .post(`/api/pagos/${pago.id}/validar`)
+      .set(bearer(token))
+      .send({ movimientoBancoId: movimiento.id });
+    const validadoDb = await prisma.pagoReportado.findUniqueOrThrow({ where: { id: pago.id } });
+    expect(validadoDb.fuenteDerivacion).toBe('movimiento');
+
+    const res = await request(app)
+      .post(`/api/pagos/${pago.id}/revertir`)
+      .set(bearer(token))
+      .send({ estado: 'pendiente' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.tipoCobroDerivado).toBeNull();
+    expect(res.body.fuenteDerivacion).toBeNull();
+    expect(res.body.antiguedadDias).toBeNull();
+
+    const pagoDb = await prisma.pagoReportado.findUniqueOrThrow({ where: { id: pago.id } });
+    expect(pagoDb.estado).toBe('pendiente');
+    expect(pagoDb.movimientoBancoId).toBeNull();
+    expect(pagoDb.tipoCobroDerivado).toBeNull();
+    expect(pagoDb.fuenteDerivacion).toBeNull();
+    expect(pagoDb.revisarClasificacion).toBe(false);
   });
 });

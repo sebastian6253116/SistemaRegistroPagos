@@ -767,3 +767,292 @@ tenía `pagos.ver_todos`, así que el cobrador no tenía forma de saber bajo qu�
   **Sin endpoints nuevos:** OpenAPI sigue en **101** operaciones y Postman en **101** peticiones.
 - **Archivos:** `api/src/middleware/auth.ts`, `web/src/types/index.ts`,
   `web/src/features/pagos/ReportarPage.tsx`, `docs/openapi.yaml`, `CHANGELOG.md`.
+
+---
+
+## 13. Iteración 9 — Antigüedad de pagos, alerta de «documento viejo», baja definitiva y correcciones de UX
+
+> **Cálculo SUPERADO por §14 (CR-005).** Varias afirmaciones de esta iteración quedan **sin efecto**:
+> (1) la **base del cálculo**, que aquí es la antigüedad en días **desde hoy**, pasa a ser la brecha
+> entre la `fechaPago` reportada y la `fechaEjecucion` del **movimiento bancario vinculado**,
+> persistida al validar; (2) el **comparador**, aquí **estricto** (`>`, con el borde "antigüedad
+> menor a N"), pasa a ser `>=` ("N días o más = viejo"); (3) la **alerta de «documento viejo»**
+> (`alertaAntiguedadDocumento` / `alertaAntiguedadDias`, con el permiso
+> `pagos.ver_alerta_antiguedad`) queda **retirada** de la API, del contrato y de la UI; y (4) el
+> **filtro `antiguedadMaxDias`**, aquí medido contra hoy, se **realinea contra el movimiento**
+> (`DATEDIFF(fecha_pago, fecha_ejecucion) < N`), excluyendo a los pagos sin movimiento. El umbral de
+> referencia ya no es "30 días por defecto contra hoy" sino el **`1`** configurado por el dueño. Se
+> conserva esta sección como **historia de la decisión**; los detalles vigentes están en §14.
+
+Lote de **11 commits** (`bdb671b`…`8436d1b`) agrupado en cuatro frentes: reportes por antigüedad,
+alerta de «documento viejo» (pago viejo contra movimiento bancario reciente), baja definitiva con
+permiso propio y correcciones de UX. A diferencia de las iteraciones 6, 7 y 8, esta **sí agrega
+endpoints**: OpenAPI **101 → 103** operaciones y Postman **101 → 103** peticiones. Además suma
+**3 permisos** (**38 → 41**) y **4 migraciones de datos** (permisos y catálogo de parámetros),
+**sin** cambios de esquema. Registro prospectivo original en
+[`CAMBIOS-SOLICITADOS.md`](./CAMBIOS-SOLICITADOS.md) (CR-004).
+
+### 13.1 Reportes
+
+- **Fecha de ejecución del movimiento bancario + filtro por ella** (`bd609fe`). El reporte `cobros`
+  ahora expone `fechaMovimiento` por fila y acepta `fechaMovimientoDesde`/`fechaMovimientoHasta`
+  (`api/src/modules/reportes/reportes.schema.ts`, `reportes.controller.ts`,
+  `reportes.service.ts`). El filtro es **opt-in**: solo lo aplica `cobros`
+  (`wherePagosPrisma(f, { conFechaMovimiento: true })`), para no vaciar `pendientes` ni
+  `pagos-sin-respaldo` y para no filtrar ingresos contra gastos sin filtrar en `flujo-caja`.
+- **Totales de no conciliados y fix del filtro de cobrador** (`65e2525`).
+  `movimientosNoConciliados()` devuelve un objeto aditivo `totales: { cantidad, totalBs }`, agregado
+  con el **mismo** `where` que las filas paginadas; la pestaña lo muestra en una tarjeta de resumen.
+  En paralelo, el filtro de cobrador de reportes pasó a pedir **solo activos**
+  (`listarCobradores({ pageSize: 200, activo: true })`) y a descartar los cobradores con `nombre`
+  vacío (era el único selector de cobradores que no filtraba por `activo`).
+- **Filtro por antigüedad** (`e29ed6c`). Nuevo `antiguedadMaxDias` (entero positivo) que conserva
+  los pagos cuya antigüedad, contada en **días completos desde hoy**, es **menor** a N; el borde es
+  **estricto** (un pago de exactamente N días queda excluido). Aplica solo a `cobros`, por el mismo
+  camino opt-in.
+- **Antigüedad en días + marca «Viejo»** (`8436d1b`). `antiguedadEnDias()` y `esPagoViejo()`
+  (`api/src/lib/classification.ts`) alimentan `camposAntiguedad()` en `reportes.service.ts`, que
+  emite `antiguedadDias` (firmado: hoy = 0, fecha futura negativa) y `esViejo`
+  (`antiguedadDias > cobro.umbral_antiguedad_dias`, estricto). Se calculan **al vuelo** con el umbral
+  vigente: sin columna, sin job y sin migración. La exportación suma las columnas «Antigüedad» y
+  «Viejo».
+
+### 13.2 Pagos / conciliación
+
+- **Alerta de «documento viejo» con permiso propio** (`c952d28`). `alertaAntiguedadDocumento()`
+  (`classification.ts`) devuelve los días completos entre `fechaPago` y la `fechaEjecucion` del
+  movimiento bancario vinculado cuando la diferencia **supera** `cobro.umbral_antiguedad_dias`, o
+  `null` si no aplica. `serializePago()` (`api/src/modules/pagos/pagos.service.ts`) emite
+  `alertaAntiguedadDias` **siempre** (null cuando el usuario no tiene
+  `pagos.ver_alerta_antiguedad`), resolviendo la configuración **una vez por request**. El límite es
+  **de servidor** (`puedeVerAlertaAntiguedad(user)`), no del frontend. El badge se muestra en Mis
+  pagos, Validación y la pestaña Cobros de reportes (`web/src/features/pagos/pago-utils.tsx`).
+- **Edición de la fecha de pago** (`ff4b30c`). `EditarPagoDialog.tsx` agrega un input `type="date"`
+  sembrado desde la **parte UTC** del `DATE` (`fechaPagoInput()`), envía `fechaPago` siempre y
+  deshabilita «Guardar cambios» si está vacío.
+- **`58eeb44` es un refinamiento de CR-001, no una funcionalidad nueva.** CR-001 (§9) fijó el piso de
+  contraste en **4 dígitos** (`MIN_DIGITOS_CONTRASTE`) pero dejó `match.reference_suffix` en **8**;
+  este commit baja el sufijo configurado a **4** en `api/prisma/seed.ts` y `MATCH_REFERENCE_SUFFIX`
+  (`api/src/config/env.ts`) y lo aplica a producción con una migración. **No** se re-documenta CR-001.
+
+### 13.3 Seguridad / datos
+
+- **Baja definitiva con permiso propio para usuarios y cobradores** (`f2bd31b`). Dos endpoints
+  nuevos, `DELETE /api/usuarios/{id}/definitivo` (`requirePermiso('usuarios.eliminar_definitivo')`)
+  y `DELETE /api/cobradores/{id}/definitivo` (`requirePermiso('cobradores.eliminar_definitivo')`),
+  más diálogos destructivos en `UsuariosTab.tsx` y `CobradoresTab.tsx`. `removeDefinitivo()`
+  (`usuarios.service.ts`) cuenta bloqueos (`gastos`, `conciliaciones`, lotes de importación, pagos
+  validados y pagos del cobrador vinculado), rechaza con **409** detallando el bloqueo y con **400**
+  el auto-borrado; un usuario con cobrador vinculado **sin pagos** se borra junto con él. Todo el
+  conteo, el borrado y la auditoría (`accion: 'borrar_definitivo'`) corren en **una transacción**,
+  con la violación de FK concurrente (`P2003`) traducida a **409**. `cobradores.service.ts` aplica la
+  misma forma y rechaza **409** si el cobrador tiene pagos reportados. Nuevos permisos:
+  `usuarios.eliminar_definitivo` y `cobradores.eliminar_definitivo` (**Administrador**).
+- **`316b848` es housekeeping documental.** Corrige un comentario de FK en
+  `usuarios.service.ts`: `pagos_reportados.validado_por` es `SET NULL` y **nunca** dispara una
+  violación; la carrera residual la causan las dependencias `RESTRICT` que la base revalida. Una
+  línea, sin cambio de comportamiento.
+
+### 13.4 UX / infra
+
+- **Buscador de cobrador con memoria del último usado** (`bdb671b`).
+  `web/src/features/pagos/ReportarPage.tsx` reemplaza el `Select` por `Combobox` (filtra por código o
+  nombre) y persiste el último cobrador por usuario en `localStorage`
+  (`gentioncobros:ultimoCobrador:<userId>`), preseleccionándolo en el siguiente registro. La lectura
+  decae en silencio si `localStorage` no está disponible.
+- **Fix del corrimiento de un día en columnas `DATE`** (`441a7f2`). `parseCalendarDate()`
+  (`web/src/lib/format.ts`) extrae la parte de fecha y la ancla a medianoche **local**, de modo que
+  una columna `DATE` (serializada como medianoche UTC) no se corre un día en offsets UTC negativos.
+  `MovimientosPage.tsx` deja de pasar un instante real (`createdAt`) a `formatDate` y usa
+  `formatDateTime` con la etiqueta «Fecha de importación».
+- **Addendum — `PasswordInput` (commit `d332d2c`, inmediatamente anterior al rango).** Este commit,
+  previo a `bdb671b` y también sin documentar, introduce
+  `web/src/components/ui/password-input.tsx` con alternancia mostrar/ocultar, adoptado en
+  `LoginPage.tsx`, `ResetPasswordPage.tsx` y `UsuariosTab.tsx`. Se registra aquí para cerrar el
+  alcance; no forma parte de los 11 commits del lote.
+
+### 13.5 Verificación
+
+- **Tests unitarios:** `npm test` en `api/` → **112 tests en verde**, **10 archivos**
+  (`bcv` 10, `classification` **19**, `schemas` 3, `optimistic-lock` 4, `money` 10,
+  `cobrador-sync` 6, `config-values` 3, `parser` 14, `matcher` **31**,
+  `eliminacion-definitiva` **12**). Se agregó `api/tests/eliminacion-definitiva.test.ts` (12 casos) y crecieron
+  `classification` y `matcher` (este último con los casos del contraste de 4 dígitos).
+- **Compilación:** `npm run build` en `api/` (`tsc -p tsconfig.json`) **OK** y en `web/`
+  (`tsc --noEmit && vite build`) **OK** (~13 s en esta pasada).
+- **Permisos (verificado en `api/prisma/seed.ts`):** **38 → 41** claves. Nuevas:
+  `usuarios.eliminar_definitivo` y `cobradores.eliminar_definitivo` (**solo Administrador**) y
+  `pagos.ver_alerta_antiguedad` (**Administrador** y **Administrativo**). Conteo por rol:
+  Administrador **41** (todos), Administrativo **20** (antes 19), Consultor **10**, Cobrador **3**.
+- **Endpoints:** OpenAPI **101 → 103** operaciones y Postman **101 → 103** peticiones.
+  Reconciliación: **103** = **102** definiciones `router.{get,post,put,patch,delete}` en los
+  `*.routes.ts` + `GET /health` público.
+- **Migraciones (4, todas de datos; sin cambios de columnas ni tablas).**
+  `20260921000000_permisos_eliminacion_definitiva` (inserta los 2 permisos de baja definitiva y los
+  otorga a Administrador), `20260921120000_conciliacion_sufijo_4` (lleva `match.reference_suffix` a
+  **4** con `INSERT … ON DUPLICATE KEY UPDATE`), `20260921130000_parametros_catalogo` (siembra el
+  catálogo de 7 parámetros con `INSERT IGNORE`, para bases creadas solo con `migrate deploy`; **no**
+  sobrescribe valores personalizados) y `20260921140000_permiso_alerta_antiguedad` (inserta
+  `pagos.ver_alerta_antiguedad` y lo otorga a Administrador y Administrativo). El único cambio de
+  `api/prisma/schema.prisma` en el rango es un **comentario** del enum de `auditoria.accion`
+  (`borrar_definitivo`).
+- **Parámetros (`parametros` / `api/src/lib/config-values.ts`):** `match.reference_suffix` **8 → 4**;
+  `cobro.umbral_antiguedad_dias` = **30**, reutilizado por la alerta de documento viejo y por la
+  marca «Viejo». Los filtros de reportes son **query params**, no claves de `parametros`
+  (`fechaMovimientoDesde`, `fechaMovimientoHasta`, `antiguedadMaxDias`).
+- **Contratos:** `docs/openapi.yaml` y `docs/postman_collection.json` documentan los 2 endpoints
+  nuevos y los campos aditivos (`fechaMovimiento`, `antiguedadDias`, `esViejo`, `alertaAntiguedadDias`,
+  `totales`).
+
+**Con endpoints nuevos:** OpenAPI **101 → 103** operaciones y Postman **101 → 103** peticiones.
+
+### 13.6 Archivos de esta iteración
+
+- `api/src/modules/reportes/{reportes.service,reportes.controller,reportes.schema}.ts` — fecha de
+  movimiento y su filtro, `antiguedadMaxDias`, antigüedad/marca «Viejo» y `totales`.
+- `api/src/lib/classification.ts` — `alertaAntiguedadDocumento`, `antiguedadEnDias`, `esPagoViejo`.
+- `api/src/modules/pagos/pagos.service.ts` — `alertaAntiguedadDias` gated por permiso.
+- `api/src/lib/audit.ts` — acción `borrar_definitivo`.
+- `api/src/modules/usuarios/{usuarios.routes,usuarios.controller,usuarios.service}.ts` y
+  `api/src/modules/cobradores/{cobradores.routes,cobradores.controller,cobradores.service}.ts` —
+  `removeDefinitivo()`.
+- `api/prisma/seed.ts` — 3 permisos nuevos (41); `match.reference_suffix` a 4; Administrativo +1.
+- `api/src/config/env.ts`, `api/.env.example` — `MATCH_REFERENCE_SUFFIX` a 4.
+- `api/prisma/migrations/20260921000000_permisos_eliminacion_definitiva/`,
+  `20260921120000_conciliacion_sufijo_4/`, `20260921130000_parametros_catalogo/`,
+  `20260921140000_permiso_alerta_antiguedad/` — 4 migraciones de datos.
+- `api/tests/eliminacion-definitiva.test.ts` — suite nueva; `api/tests/classification.test.ts` y
+  `api/tests/matcher.test.ts` — casos nuevos.
+- `web/src/features/reportes/ReportesPage.tsx`, `web/src/api/reportes.ts`,
+  `web/src/types/index.ts` — filtros, columnas y totales.
+- `web/src/features/pagos/{ReportarPage,MisPagosPage,EditarPagoDialog,pago-utils}.tsx`,
+  `web/src/features/validacion/ValidacionPage.tsx` — alerta, edición de fecha y buscador de cobrador.
+- `web/src/features/configuracion/{UsuariosTab,CobradoresTab}.tsx`, `web/src/api/{usuarios,cobradores}.ts`
+  — baja definitiva en la UI.
+- `web/src/lib/format.ts`, `web/src/features/movimientos/MovimientosPage.tsx` — fix del corrimiento
+  de un día.
+- `docs/openapi.yaml`, `docs/postman_collection.json`, los tres README, `CAMBIOS-SOLICITADOS.md` y
+  este `CHANGELOG.md` — sincronización documental.
+
+---
+
+## 14. Iteración 10 — Antigüedad determinada por el movimiento bancario y persistida al validar (CR-005)
+
+La antigüedad de un pago deja de derivarse al vuelo contra "hoy" y pasa a ser la brecha entre la
+`fechaPago` reportada por el cobrador y la `fechaEjecucion` del **movimiento bancario vinculado**,
+determinada y **persistida al validar**. A diferencia de las iteraciones 6 y 7 (y como la 8 y la 9),
+esta **no agrega endpoints**: OpenAPI sigue en **103** operaciones y Postman en **103** peticiones.
+Sí **cambia el esquema** (1 enum + 1 columna nullable) con **una migración sin backfill**; los
+permisos siguen en **41**. Registro prospectivo original en
+[`CAMBIOS-SOLICITADOS.md`](./CAMBIOS-SOLICITADOS.md) (CR-005).
+
+**Dos decisiones del dueño (2026-09-21):** (1) **visibilidad — opción (c):** el veredicto se muestra
+en el **toast de validación** y en la **columna «Antigüedad»** de la bandeja; (2) **comparador y
+umbral:** la comparación final es `>=` ("N días o más = viejo") con el umbral en el **`1`** ya
+configurado por el dueño, **sin migración de datos**.
+
+### 14.1 Cálculo y veredicto
+
+- **Brecha firmada en días completos.** `antiguedadEnDias(fechaPago, fechaEjecucionMovimiento)`
+  (`api/src/lib/classification.ts`) devuelve
+  `Math.floor((fechaPago - fechaEjecucionMovimiento) / 86_400_000)`: `0` = mismo día; positivo = el
+  movimiento es anterior, es decir **pago viejo**; negativo = el movimiento es posterior (nunca
+  viejo, se conserva con signo).
+- **Comparador final `>=`.** `esPagoViejo(antiguedadDias, umbralDias)` = `antiguedadDias >=
+  umbralDias`. Con el umbral `1` configurado por el dueño, una brecha de 1 día **ya** es vieja y una
+  de `0` no. El borde exacto del umbral **sí** cuenta (a diferencia del `>` de la iteración 9).
+- **Alerta eliminada.** `alertaAntiguedadDocumento` ya no existe. `clasificarPorAntiguedad` se
+  conserva por compatibilidad, pero **no** alimenta `tipoCobroDerivado`: solo la clasificación
+  heredada que se calcula al reportar cuando llega `fechaDocumento` (`fuenteDerivacion = 'reporte'`).
+
+### 14.2 Esquema y migración
+
+- **Enum y columna nuevos.** `enum FuenteDerivacion { reporte, movimiento }` y
+  `PagoReportado.fuenteDerivacion FuenteDerivacion? @map("fuente_derivacion")` en
+  `api/prisma/schema.prisma` (líneas 215 y 243).
+- **Migración de una sola sentencia, sin backfill.**
+  `api/prisma/migrations/20260921230918_antiguedad_movimiento_fuente/migration.sql`:
+  `ALTER TABLE \`pagos_reportados\` ADD COLUMN \`fuente_derivacion\` ENUM('reporte', 'movimiento') NULL`.
+  Los pagos previos quedan en `NULL` y no entran en los buckets de nuevo/viejo hasta validarse.
+
+### 14.3 Escritura y lectura del veredicto
+
+- **Escritura en 5 caminos.** `validarPago` (`conciliacion.service.ts:120-151`) y `validarLote`
+  (`:338-360`) persisten `tipoCobroDerivado` + `fuenteDerivacion = 'movimiento'` +
+  `revisarClasificacion` en el mismo CAS; `editarPago` (`pagos.service.ts:486-493`) lo recalcula
+  contra el movimiento **solo si cambia `fechaPago`** en un pago validado; `revertirPago`
+  (`pagos.service.ts:659-663`) lo **limpia**; `reportarPago` (`pagos.service.ts:199-201`) marca
+  `fuenteDerivacion = 'reporte'`.
+- **Lectura del veredicto persistido.** El reporte nuevo vs. viejo agrupa por `tipo_cobro_derivado`
+  restringido a `fuente_derivacion = 'movimiento'` (`reportes.service.ts`, `soloFuenteMovimiento:
+  true`); el dashboard aplica el mismo criterio (`dashboard.service.ts:214-231`). Un pago sin
+  veredicto de movimiento queda **excluido** de esos agregados.
+- **Payload aditivo.** `serializePago()` (`pagos.service.ts:82-87`) emite `antiguedadDias` nullable,
+  calculado solo cuando `fuenteDerivacion === 'movimiento'` y existe la fecha del movimiento; en
+  cualquier otro caso es `null`. Es el espejo del veredicto persistido, no un recálculo del cliente.
+
+### 14.4 Filtro realineado y contrato
+
+- **El filtro `antiguedadMaxDias` se mide contra el movimiento.** `condicionAntiguedadSql()`
+  (`reportes.service.ts`) usa `EXISTS (SELECT 1 FROM movimientos_banco mb WHERE mb.id =
+  p.movimiento_banco_id AND DATEDIFF(p.fecha_pago, mb.fecha_ejecucion) < N)`; el borde sigue siendo
+  **estricto** ("menor a N días"). Un pago **sin movimiento vinculado queda excluido** mientras el
+  filtro esté activo.
+- **Campos de fila coherentes.** `camposAntiguedad()` (`reportes.service.ts:296-309`) emite
+  `antiguedadDias` firmado y `esViejo` con `>=`; sin movimiento, `antiguedadDias: null` y
+  `esViejo: false`.
+- **Contrato.** `docs/openapi.yaml`: se **retira** `alertaAntiguedadDias` del esquema `Pago` y del
+  endpoint `/reportes/cobros`; se **agregan** `fuenteDerivacion` (enum nullable) y `antiguedadDias`
+  (nullable). La entrada `fechaDocumento` de `POST /pagos` se conserva, con su descripción corregida
+  para aclarar que **no** determina el veredicto que leen los reportes. En
+  `docs/postman_collection.json` no había campos obsoletos (no declara respuestas de pago); se
+  aclaró la descripción de «Reportar pago».
+
+### 14.5 Retiro de la alerta y visibilidad (UI)
+
+- **Alerta retirada del frontend.** `AlertaAntiguedadBadge` eliminado y removido de `ReportesPage`,
+  `MisPagosPage` y `ValidacionPage`; `alertaAntiguedadDias` fuera de `web/src/types/index.ts`.
+- **Permiso huérfano (deliberado).** `pagos.ver_alerta_antiguedad` **sigue** en `api/prisma/seed.ts`
+  y en la base (**41** permisos), pero ya **no lo lee** ni la API ni la UI. El seed **no** se toca.
+- **Visibilidad del veredicto (decisión del dueño, opción (c)).** Columna **«Antigüedad»** en la
+  bandeja de validación (`AntiguedadVeredicto` en `web/src/features/pagos/pago-utils.tsx`, montada
+  en `ValidacionPage.tsx:479-481`), con `—` cuando el pago no tiene veredicto de movimiento (p. ej.
+  un `pendiente`), y **toast de validación** (`descripcionVeredicto()`, `ValidacionPage.tsx:213`):
+  `Del día` / `Viejo (2 días)`.
+
+### 14.6 Verificación
+
+- **Tests unitarios:** `npm test` en `api/` → **109 passed / 10 archivos**, incluida la suite
+  `classification` con los casos borde de la brecha firmada y del comparador `>=`.
+- **Compilación:** `npm run build` en `api/` **OK** y en `web/` **OK**.
+- **Integración:** **14 passed** (10 pre-existentes + **4** de CR-005 en
+  `api/tests/integration/pagos.int.test.ts`: brecha vieja, mismo día, borde del umbral y ausencia de
+  movimiento).
+- **Permisos (verificado en `api/prisma/seed.ts`):** **41**, sin cambios por CR-005.
+- **Contratos:** `docs/openapi.yaml` **103** operaciones y `docs/postman_collection.json` **103**
+  peticiones (sin cambios de conteo; CR-005 no agrega ni quita endpoints).
+
+**Sin endpoints nuevos:** OpenAPI sigue en **103** operaciones y Postman en **103** peticiones.
+
+### 14.7 Archivos de esta iteración
+
+- `api/src/lib/classification.ts` — `antiguedadEnDias` (brecha firmada), `esPagoViejo` (`>=`);
+  `alertaAntiguedadDocumento` eliminada.
+- `api/src/modules/pagos/pagos.service.ts` — `serializePago` emite `antiguedadDias`; `reportarPago`
+  marca `fuente_derivacion = 'reporte'`; `editarPago` recalcula y `revertirPago` limpia el veredicto.
+- `api/src/modules/conciliacion/conciliacion.service.ts` — `validarPago` y `validarLote` persisten el
+  veredicto desde el movimiento.
+- `api/src/modules/reportes/{reportes.service,reportes.controller}.ts` — filtro realineado al
+  movimiento y campos de fila coherentes.
+- `api/src/modules/dashboard/dashboard.service.ts` — lee el veredicto persistido
+  (`fuente_derivacion = 'movimiento'`).
+- `api/prisma/schema.prisma` — enum `FuenteDerivacion` y columna `fuente_derivacion`.
+- `api/prisma/migrations/20260921230918_antiguedad_movimiento_fuente/` — 1 columna, sin backfill.
+- `api/prisma/seed-demo.ts` — datos de demostración alineados al veredicto persistido.
+- `api/tests/classification.test.ts`, `api/tests/integration/pagos.int.test.ts` — casos nuevos.
+- `web/src/features/validacion/ValidacionPage.tsx`,
+  `web/src/features/pagos/{pago-utils,MisPagosPage}.tsx`,
+  `web/src/features/reportes/ReportesPage.tsx`, `web/src/types/index.ts` — columna «Antigüedad»,
+  toast y retiro de la alerta.
+- `docs/openapi.yaml`, `docs/postman_collection.json`, los tres README, `CAMBIOS-SOLICITADOS.md` y
+  este `CHANGELOG.md` — sincronización documental.

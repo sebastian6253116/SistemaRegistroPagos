@@ -1,7 +1,9 @@
-import { Prisma, TipoConciliacion } from '@prisma/client';
+import { Prisma, TipoCobro, TipoConciliacion } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { ApiError } from '../../lib/http';
 import { auditar, snapshot } from '../../lib/audit';
+import { antiguedadEnDias, esPagoViejo } from '../../lib/classification';
+import { getConfigValues } from '../../lib/config-values';
 import { crearParaCobrador } from '../notificaciones/notificaciones.service';
 import { pagoCasReconciliacionWhere, pagoModificadoError } from '../pagos/optimistic-lock';
 import { buscarCoincidencias, buscarDuplicado } from './matcher';
@@ -51,6 +53,11 @@ export interface ValidarInput {
  */
 export async function validarPago(input: ValidarInput) {
   const { pagoReportadoId, usuarioId } = input;
+
+  // Resolved ONCE per request, BEFORE the transaction: `getConfigValues` keeps a
+  // short in-memory cache, and reading it here means a single config read while
+  // the transaction only holds connection time for the writes it must own.
+  const { umbralAntiguedadDias } = await getConfigValues();
 
   const resultado = await prisma.$transaction(async (tx) => {
     // Re-read INSIDE the transaction and branch on the FRESH state: the payment
@@ -107,6 +114,14 @@ export async function validarPago(input: ValidarInput) {
 
     const diferenciaBs = pago.montoBs.minus(movimiento.montoBs);
 
+    // Derive the vintage verdict from the collector-reported `fechaPago` against
+    // the LINKED movement's `fechaEjecucion`, at validation time. A POSITIVE gap
+    // means the movement is earlier than the report, i.e. an old payment.
+    const antiguedadDias = antiguedadEnDias(pago.fechaPago, movimiento.fechaEjecucion);
+    const tipoCobroDerivado = esPagoViejo(antiguedadDias, umbralAntiguedadDias)
+      ? TipoCobro.viejo
+      : TipoCobro.nuevo;
+
     const conciliacion = await tx.conciliacion.create({
       data: {
         pagoReportadoId: pago.id,
@@ -128,6 +143,11 @@ export async function validarPago(input: ValidarInput) {
         validadoPor: usuarioId,
         validadoAt: new Date(),
         motivoRechazo: null,
+        // Persist the verdict in the SAME CAS write. Flag (never overwrite) a
+        // mismatch between the collector's mark and the derived value.
+        tipoCobroDerivado,
+        fuenteDerivacion: 'movimiento',
+        revisarClasificacion: tipoCobroDerivado !== pago.tipoCobro,
       },
     });
     if (count !== 1) throw pagoModificadoError();
@@ -261,6 +281,9 @@ export async function validarLote(
 ): Promise<LoteResultado> {
   if (items.length === 0) throw ApiError.badRequest('No se enviaron pagos para validar');
 
+  // Resolved ONCE for the whole batch, BEFORE the transaction (single config read).
+  const { umbralAntiguedadDias } = await getConfigValues();
+
   const resultado = await prisma.$transaction(async (tx) => {
     let procesados = 0;
     const errores: { pagoReportadoId: number; motivo: string }[] = [];
@@ -269,6 +292,7 @@ export async function validarLote(
       cobradorId: number;
       referencia: string;
       montoBs: Prisma.Decimal;
+      tipoCobroDerivado: TipoCobro;
     }[] = [];
 
     for (const item of items) {
@@ -310,6 +334,12 @@ export async function validarLote(
         continue;
       }
 
+      // Same movement-based derivation as `validarPago`, per batch item.
+      const antiguedadDias = antiguedadEnDias(pago.fechaPago, movimiento.fechaEjecucion);
+      const tipoCobroDerivado = esPagoViejo(antiguedadDias, umbralAntiguedadDias)
+        ? TipoCobro.viejo
+        : TipoCobro.nuevo;
+
       await tx.conciliacion.create({
         data: {
           pagoReportadoId: pago.id,
@@ -326,6 +356,9 @@ export async function validarLote(
           movimientoBancoId: movimiento.id,
           validadoPor: usuarioId,
           validadoAt: new Date(),
+          tipoCobroDerivado,
+          fuenteDerivacion: 'movimiento',
+          revisarClasificacion: tipoCobroDerivado !== pago.tipoCobro,
         },
       });
       await tx.movimientoBanco.update({
@@ -337,6 +370,7 @@ export async function validarLote(
         cobradorId: pago.cobradorId,
         referencia: pago.referencia,
         montoBs: pago.montoBs,
+        tipoCobroDerivado,
       });
       procesados++;
     }
