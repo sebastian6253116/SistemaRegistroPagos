@@ -38,6 +38,7 @@ import { DataTable } from '@/components/common/DataTable';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ClearFiltersButton } from '@/components/common/ClearFiltersButton';
+import { DateRangeFilter } from '@/components/common/DateRangeFilter';
 import { FilePreviewDialog } from '@/components/common/FilePreviewDialog';
 import { AntiguedadVeredicto, descripcionVeredicto, EstadoBadge, TipoCobroBadge } from '@/features/pagos/pago-utils';
 import { EditarPagoDialog } from '@/features/pagos/EditarPagoDialog';
@@ -528,14 +529,13 @@ export default function ValidacionPage() {
       />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
-        <div className="space-y-1.5">
-          <Label htmlFor="v-desde">Desde</Label>
-          <Input id="v-desde" type="date" value={fechaDesde} onChange={(e) => { setFechaDesde(e.target.value); setPage(1); }} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="v-hasta">Hasta</Label>
-          <Input id="v-hasta" type="date" value={fechaHasta} onChange={(e) => { setFechaHasta(e.target.value); setPage(1); }} />
-        </div>
+        <DateRangeFilter
+          desde={fechaDesde}
+          hasta={fechaHasta}
+          idPrefix="v"
+          onDesdeChange={(value) => { setFechaDesde(value); setPage(1); }}
+          onHastaChange={(value) => { setFechaHasta(value); setPage(1); }}
+        />
         <div className="space-y-1.5">
           <Label htmlFor="v-estado">Estado</Label>
           <Select

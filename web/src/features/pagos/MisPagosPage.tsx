@@ -13,6 +13,7 @@ import { DataTable } from '@/components/common/DataTable';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ClearFiltersButton } from '@/components/common/ClearFiltersButton';
+import { DateRangeFilter } from '@/components/common/DateRangeFilter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -164,14 +165,14 @@ export default function MisPagosPage() {
       />
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="fechaDesde">Desde</Label>
-          <Input id="fechaDesde" type="date" value={fechaDesde} onChange={(e) => { setFechaDesde(e.target.value); setPage(1); }} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="fechaHasta">Hasta</Label>
-          <Input id="fechaHasta" type="date" value={fechaHasta} onChange={(e) => { setFechaHasta(e.target.value); setPage(1); }} />
-        </div>
+        <DateRangeFilter
+          desde={fechaDesde}
+          hasta={fechaHasta}
+          desdeId="fechaDesde"
+          hastaId="fechaHasta"
+          onDesdeChange={(value) => { setFechaDesde(value); setPage(1); }}
+          onHastaChange={(value) => { setFechaHasta(value); setPage(1); }}
+        />
         <div className="space-y-1.5">
           <Label htmlFor="referencia">Referencia</Label>
           <Input id="referencia" placeholder="Buscar…" value={referencia} onChange={(e) => { setReferencia(e.target.value); setPage(1); }} />

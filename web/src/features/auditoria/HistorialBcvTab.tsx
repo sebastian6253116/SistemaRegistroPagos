@@ -7,8 +7,7 @@ import { formatDateTime, formatRate } from '@/lib/format';
 import { DataTable } from '@/components/common/DataTable';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ClearFiltersButton } from '@/components/common/ClearFiltersButton';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { DateRangeFilter } from '@/components/common/DateRangeFilter';
 import type { TasaBcv } from '@/types';
 
 const PAGE_SIZE = 25;
@@ -54,30 +53,13 @@ export default function HistorialBcvTab() {
   return (
     <div>
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:max-w-xl">
-        <div className="space-y-1.5">
-          <Label htmlFor="bcv-desde">Desde</Label>
-          <Input
-            id="bcv-desde"
-            type="date"
-            value={fechaDesde}
-            onChange={(e) => {
-              setFechaDesde(e.target.value);
-              setPage(1);
-            }}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="bcv-hasta">Hasta</Label>
-          <Input
-            id="bcv-hasta"
-            type="date"
-            value={fechaHasta}
-            onChange={(e) => {
-              setFechaHasta(e.target.value);
-              setPage(1);
-            }}
-          />
-        </div>
+        <DateRangeFilter
+          desde={fechaDesde}
+          hasta={fechaHasta}
+          idPrefix="bcv"
+          onDesdeChange={(value) => { setFechaDesde(value); setPage(1); }}
+          onHastaChange={(value) => { setFechaHasta(value); setPage(1); }}
+        />
         <div className="flex items-end">
           <ClearFiltersButton
             current={{ fechaDesde, fechaHasta }}

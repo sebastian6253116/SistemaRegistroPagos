@@ -14,10 +14,10 @@ import { DataTable } from '@/components/common/DataTable';
 import { EstadoBadge } from '@/features/pagos/pago-utils';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ClearFiltersButton } from '@/components/common/ClearFiltersButton';
+import { DateRangeFilter } from '@/components/common/DateRangeFilter';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -943,37 +943,27 @@ export default function ReportesPage() {
       />
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <div className="space-y-1.5">
-          <Label htmlFor="r-desde">Desde</Label>
-          <Input id="r-desde" type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="r-hasta">Hasta</Label>
-          <Input id="r-hasta" type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} />
-        </div>
+        <DateRangeFilter
+          desde={fechaDesde}
+          hasta={fechaHasta}
+          idPrefix="r"
+          onDesdeChange={(value) => setFechaDesde(value)}
+          onHastaChange={(value) => setFechaHasta(value)}
+        />
         {/* The bank-movement date filter is supported only by the `cobros`
             report, so it is shown only while that tab is active. A value set
             there stays stored but is inert for the other reports. */}
         {tab === 'cobros' && (
           <>
-            <div className="space-y-1.5">
-              <Label htmlFor="r-mov-desde">Movimiento desde</Label>
-              <Input
-                id="r-mov-desde"
-                type="date"
-                value={fechaMovimientoDesde}
-                onChange={(e) => setFechaMovimientoDesde(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="r-mov-hasta">Movimiento hasta</Label>
-              <Input
-                id="r-mov-hasta"
-                type="date"
-                value={fechaMovimientoHasta}
-                onChange={(e) => setFechaMovimientoHasta(e.target.value)}
-              />
-            </div>
+            <DateRangeFilter
+              desde={fechaMovimientoDesde}
+              hasta={fechaMovimientoHasta}
+              idPrefix="r-mov"
+              desdeLabel="Movimiento desde"
+              hastaLabel="Movimiento hasta"
+              onDesdeChange={(value) => setFechaMovimientoDesde(value)}
+              onHastaChange={(value) => setFechaMovimientoHasta(value)}
+            />
             {/* Classification filter: only the `cobros` report applies it, so it
                 is shown only while that tab is active, like the movement-date
                 filter. */}

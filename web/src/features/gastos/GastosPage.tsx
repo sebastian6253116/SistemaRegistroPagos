@@ -20,6 +20,7 @@ import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable } from '@/components/common/DataTable';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ClearFiltersButton } from '@/components/common/ClearFiltersButton';
+import { DateRangeFilter } from '@/components/common/DateRangeFilter';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { FilePreviewDialog } from '@/components/common/FilePreviewDialog';
 import { Button } from '@/components/ui/button';
@@ -252,14 +253,13 @@ export default function GastosPage() {
       />
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="g-desde">Desde</Label>
-          <Input id="g-desde" type="date" value={fechaDesde} onChange={(e) => { setFechaDesde(e.target.value); setPage(1); }} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="g-hasta">Hasta</Label>
-          <Input id="g-hasta" type="date" value={fechaHasta} onChange={(e) => { setFechaHasta(e.target.value); setPage(1); }} />
-        </div>
+        <DateRangeFilter
+          desde={fechaDesde}
+          hasta={fechaHasta}
+          idPrefix="g"
+          onDesdeChange={(value) => { setFechaDesde(value); setPage(1); }}
+          onHastaChange={(value) => { setFechaHasta(value); setPage(1); }}
+        />
         <div className="space-y-1.5">
           <Label htmlFor="g-categoria">Categoría</Label>
           <Select id="g-categoria" value={categoria} onChange={(e) => { setCategoria(e.target.value); setPage(1); }}>

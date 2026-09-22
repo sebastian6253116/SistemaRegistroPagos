@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable } from '@/components/common/DataTable';
 import { ErrorState } from '@/components/common/ErrorState';
 import { ClearFiltersButton } from '@/components/common/ClearFiltersButton';
+import { DateRangeFilter } from '@/components/common/DateRangeFilter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -183,14 +184,13 @@ export default function MovimientosPage() {
       />
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <div className="space-y-1.5">
-          <Label htmlFor="m-desde">Desde</Label>
-          <Input id="m-desde" type="date" value={fechaDesde} onChange={(e) => { setFechaDesde(e.target.value); setPage(1); }} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="m-hasta">Hasta</Label>
-          <Input id="m-hasta" type="date" value={fechaHasta} onChange={(e) => { setFechaHasta(e.target.value); setPage(1); }} />
-        </div>
+        <DateRangeFilter
+          desde={fechaDesde}
+          hasta={fechaHasta}
+          idPrefix="m"
+          onDesdeChange={(value) => { setFechaDesde(value); setPage(1); }}
+          onHastaChange={(value) => { setFechaHasta(value); setPage(1); }}
+        />
         <div className="space-y-1.5">
           <Label htmlFor="m-estado">Conciliación</Label>
           <Select id="m-estado" value={estadoConciliacion} onChange={(e) => { setEstadoConciliacion(e.target.value); setPage(1); }}>
