@@ -127,6 +127,24 @@ function TablaWrapper({
   );
 }
 
+/**
+ * Renders the "new vs. old" classification for a `cobros` row from the SIGNED
+ * whole-day gap (`antiguedadDias`) between the reported payment date and the
+ * linked bank movement's execution date, persisted at validation.
+ *
+ * - `null`/`undefined` → no linked movement (not validated/conciliated): muted `—`.
+ * - `0` → movement executed the same day it was reported: muted `Del día`.
+ * - `> 0` → gap reaches the configured threshold: `Viejo` warning badge.
+ * - `< 0` → the movement was executed AFTER the reported date, so the payment is
+ *   NOT old; it falls in the non-old bucket alongside same-day and renders as
+ *   `Del día`. The signed value itself stays visible in the `Antigüedad` column.
+ */
+function VeredictoAntiguedad({ antiguedadDias }: { antiguedadDias?: number | null }) {
+  if (antiguedadDias == null) return <span className="text-muted-foreground">—</span>;
+  if (antiguedadDias > 0) return <Badge variant="warning">Viejo</Badge>;
+  return <span className="text-muted-foreground">Del día</span>;
+}
+
 function CobrosTab({ filtros, onPageChange }: ReportTabProps) {
   const q = useQuery({
     queryKey: queryKeys.reporte('cobros', filtros),
@@ -144,7 +162,7 @@ function CobrosTab({ filtros, onPageChange }: ReportTabProps) {
       { accessorKey: 'montoUsd', header: 'Monto USD', cell: ({ row }) => formatMoney(row.original.montoUsd) },
       { accessorKey: 'tasa', header: 'Tasa', cell: ({ row }) => formatRate(row.original.tasa) },
       { accessorKey: 'antiguedadDias', header: 'Antigüedad', cell: ({ row }) => (row.original.antiguedadDias != null ? `${row.original.antiguedadDias} días` : '—') },
-      { id: 'es-viejo', header: 'Viejo', cell: ({ row }) => (row.original.esViejo ? <Badge variant="warning">Viejo</Badge> : <span className="text-muted-foreground">—</span>) },
+      { id: 'es-viejo', header: 'Viejo', cell: ({ row }) => <VeredictoAntiguedad antiguedadDias={row.original.antiguedadDias} /> },
       { accessorKey: 'estado', header: 'Estado' },
     ],
     [],
@@ -206,7 +224,7 @@ function CobrosTab({ filtros, onPageChange }: ReportTabProps) {
               </div>
               <div>
                 <dt className="text-muted-foreground">Viejo</dt>
-                <dd>{row.esViejo ? <Badge variant="warning">Viejo</Badge> : <span className="text-muted-foreground">—</span>}</dd>
+                <dd><VeredictoAntiguedad antiguedadDias={row.antiguedadDias} /></dd>
               </div>
             </dl>
           </div>
