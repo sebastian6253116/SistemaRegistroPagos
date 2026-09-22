@@ -6,6 +6,8 @@ const fechaISO = z
 
 const estadoPago = z.enum(['pendiente', 'validado', 'rechazado', 'duplicado']);
 
+const clasificacionAntiguedad = z.enum(['del-dia', 'viejo']);
+
 const filtros = {
   fechaDesde: fechaISO.optional(),
   fechaHasta: fechaISO.optional(),
@@ -15,9 +17,10 @@ const filtros = {
   cobradorId: z.coerce.number().int().positive().optional(),
   bancoId: z.coerce.number().int().positive().optional(),
   estado: estadoPago.optional(),
-  // Keeps only payments younger than N whole days, counted from today in UTC.
-  // Opt-in: only the `cobros` report applies it.
-  antiguedadMaxDias: z.coerce.number().int().positive().optional(),
+  // Movement-derived vintage bucket: `del-dia` (gap <= 0) or `viejo`
+  // (gap >= the configured threshold). Opt-in: only the `cobros` report applies
+  // it. Absence means "no filter".
+  clasificacionAntiguedad: clasificacionAntiguedad.optional(),
 };
 
 export const reporteQuerySchema = z.object({

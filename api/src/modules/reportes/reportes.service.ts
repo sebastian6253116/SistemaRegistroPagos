@@ -18,11 +18,13 @@ export interface ReportFilters {
   cobradorId?: number;
   bancoId?: number;
   estado?: EstadoPagoFiltro;
-  // Keeps only payments whose whole-day age against the LINKED bank movement is
-  // strictly less than N (`DATEDIFF(fecha_pago, fecha_ejecucion) < N`). A payment
-  // with no linked movement is EXCLUDED while the filter is active. Opt-in: only
-  // the `cobros` report applies it.
-  antiguedadMaxDias?: number;
+  // Movement-derived vintage bucket, expressed against the LINKED bank
+  // movement's `fechaEjecucion`:
+  // - `del-dia`: whole-day gap `<= 0` (same day, or movement executed later).
+  // - `viejo`: gap `>=` the configured threshold (`cobro.umbral_antiguedad_dias`).
+  // A payment with no linked movement is EXCLUDED while the filter is active.
+  // Opt-in: only the `cobros` report applies it.
+  clasificacionAntiguedad?: 'del-dia' | 'viejo';
 }
 
 /** Pagination used by exports: fetch every matching row. */
@@ -44,20 +46,44 @@ function finDiaUTC(value?: string): Date | undefined {
 }
 
 /**
- * Correlated EXISTS for the opt-in age filter: keeps payments whose whole-day
- * age against the LINKED bank movement is strictly less than N, i.e.
- * `DATEDIFF(p.fecha_pago, mb.fecha_ejecucion) < N`. Both sides are DATE columns,
- * so `DATEDIFF` yields whole days and matches `antiguedadEnDias`'s floor
- * semantics; the comparison is strict to match the "menor a N días" wording.
- * A payment with NO linked movement is EXCLUDED: the correlated row does not
- * exist, so the predicate is false. Shared by the raw-SQL path and by the
- * Prisma path (which resolves the matching ids with it — see `idsConAntiguedad`).
+ * Threshold for the `viejo` bucket, read from `parametros`
+ * (`cobro.umbral_antiguedad_dias`) with a fallback of `1`, EXACTLY like the
+ * backfill migration (`20260922000000_backfill_veredicto_movimiento`). Reading
+ * it here keeps the FILTER aligned with the PERSISTED verdict instead of
+ * duplicating the threshold; the parameter value itself is never written.
  */
-function condicionAntiguedadSql(dias: number): Prisma.Sql {
+const UMBRAL_ANTIGUEDAD_SQL = Prisma.sql`COALESCE(
+  (SELECT CAST(valor AS SIGNED) FROM parametros WHERE clave = 'cobro.umbral_antiguedad_dias'),
+  1
+)`;
+
+/**
+ * Correlated EXISTS for the opt-in classification filter. It keeps payments
+ * whose SIGNED whole-day gap against the LINKED bank movement falls in the
+ * requested bucket:
+ * - `del-dia`: `DATEDIFF(p.fecha_pago, mb.fecha_ejecucion) <= 0` (gap 0, plus
+ *   NEGATIVE gaps where the movement executed AFTER the reported date — both
+ *   are "not old" and share the same non-old rendering as the badge).
+ * - `viejo`: `DATEDIFF(p.fecha_pago, mb.fecha_ejecucion) >= umbral`, where
+ *   `umbral` is the `parametros` value above.
+ *
+ * Both sides are DATE columns, so `DATEDIFF` yields whole days and matches
+ * `antiguedadEnDias`'s floor semantics. A payment with NO linked movement is
+ * EXCLUDED: the correlated row does not exist, so the predicate is false.
+ * Shared by the raw-SQL path and by the Prisma path (which resolves the
+ * matching ids with it — see `idsClasificacionAntiguedad`).
+ */
+function condicionClasificacionAntiguedadSql(
+  clasificacion: 'del-dia' | 'viejo',
+): Prisma.Sql {
+  const comparacion =
+    clasificacion === 'viejo'
+      ? Prisma.sql`DATEDIFF(p.fecha_pago, mb.fecha_ejecucion) >= ${UMBRAL_ANTIGUEDAD_SQL}`
+      : Prisma.sql`DATEDIFF(p.fecha_pago, mb.fecha_ejecucion) <= 0`;
   return Prisma.sql`EXISTS (
     SELECT 1 FROM movimientos_banco mb
     WHERE mb.id = p.movimiento_banco_id
-      AND DATEDIFF(p.fecha_pago, mb.fecha_ejecucion) < ${dias}
+      AND ${comparacion}
   )`;
 }
 
@@ -89,17 +115,17 @@ const JOIN_PAGOS = Prisma.sql`
  * Every option is OPT-IN and defaults to `false`, so each SQL report keeps its
  * previous behaviour unless it asks for more:
  * - `conFechaMovimiento`: bank movement date range, supported ONLY by `cobros`.
- * - `conAntiguedad`: movement-based age filter, supported ONLY by `cobros`
- *   (the Prisma path resolves the ids and passes them along).
+ * - `conClasificacionAntiguedad`: movement-derived vintage bucket, supported
+ *   ONLY by `cobros` (the Prisma path resolves the ids and passes them along).
  * - `soloFuenteMovimiento`: restricts to the persisted movement-derived verdict,
  *   used by `nuevo-viejo`.
- * While the movement date range or the age filter is active, a payment with NO
- * linked movement is EXCLUDED.
+ * While the movement date range or the classification filter is active, a
+ * payment with NO linked movement is EXCLUDED.
  */
 function wherePagosSql(
   f: ReportFilters,
   estadoForzado?: string,
-  opciones?: { conFechaMovimiento?: boolean; conAntiguedad?: boolean; soloFuenteMovimiento?: boolean },
+  opciones?: { conFechaMovimiento?: boolean; conClasificacionAntiguedad?: boolean; soloFuenteMovimiento?: boolean },
 ): Prisma.Sql {
   const conds: Prisma.Sql[] = [];
   const estado = estadoForzado ?? f.estado;
@@ -123,10 +149,10 @@ function wherePagosSql(
       Prisma.sql`EXISTS (SELECT 1 FROM movimientos_banco mb WHERE ${Prisma.join(movConds, ' AND ')})`,
     );
   }
-  // Opt-in age filter. Same discipline as the movement date range: a payment
-  // with NO linked movement is EXCLUDED (the correlated EXISTS is false).
-  if (opciones?.conAntiguedad && f.antiguedadMaxDias) {
-    conds.push(condicionAntiguedadSql(f.antiguedadMaxDias));
+  // Opt-in classification filter. Same discipline as the movement date range: a
+  // payment with NO linked movement is EXCLUDED (the correlated EXISTS is false).
+  if (opciones?.conClasificacionAntiguedad && f.clasificacionAntiguedad) {
+    conds.push(condicionClasificacionAntiguedadSql(f.clasificacionAntiguedad));
   }
   // Restricts to payments whose vintage verdict was derived from a linked bank
   // movement. Used by `nuevo-viejo`: a payment with no movement-derived verdict
@@ -139,16 +165,16 @@ function wherePagosSql(
 }
 
 /**
- * Resolves the ids that satisfy the opt-in age filter, using the SAME raw EXISTS
- * shape as `wherePagosSql`. The Prisma path cannot express a per-row column
- * comparison against a relation, so `cobros` feeds these ids into its Prisma
- * `WHERE id IN (...)`. A payment with NO linked movement yields no id here, so
- * it is excluded while the filter is active.
+ * Resolves the ids that satisfy the opt-in classification filter, using the
+ * SAME raw EXISTS shape as `wherePagosSql`. The Prisma path cannot express a
+ * per-row column comparison against a relation, so `cobros` feeds these ids
+ * into its Prisma `WHERE id IN (...)`. A payment with NO linked movement yields
+ * no id here, so it is excluded while the filter is active.
  */
-async function idsConAntiguedad(f: ReportFilters): Promise<number[]> {
+async function idsClasificacionAntiguedad(f: ReportFilters): Promise<number[]> {
   const where = wherePagosSql(f, f.estado, {
     conFechaMovimiento: true,
-    conAntiguedad: true,
+    conClasificacionAntiguedad: true,
   });
   const rows = await prisma.$queryRaw<{ id: number }[]>(Prisma.sql`
     SELECT p.id FROM pagos_reportados p ${JOIN_PAGOS} WHERE ${where}
@@ -179,14 +205,15 @@ function whereGastosPrisma(f: ReportFilters): Prisma.GastoWhereInput {
 
 /**
  * Builds the Prisma WHERE for payment reports. `opciones.conFechaMovimiento` and
- * `opciones.conAntiguedad` are OPT-IN and default to `false`: only the `cobros`
- * report supports the bank movement date range and the movement-based age
- * filter, so every other caller keeps its previous behaviour. While the
- * movement filter is active, a payment with NO linked movement is EXCLUDED.
+ * `opciones.conClasificacionAntiguedad` are OPT-IN and default to `false`: only
+ * the `cobros` report supports the bank movement date range and the
+ * movement-derived vintage filter, so every other caller keeps its previous
+ * behaviour. While the movement filter is active, a payment with NO linked
+ * movement is EXCLUDED.
  */
 function wherePagosPrisma(
   f: ReportFilters,
-  opciones?: { conFechaMovimiento?: boolean; conAntiguedad?: boolean; idsAntiguedad?: number[] },
+  opciones?: { conFechaMovimiento?: boolean; conClasificacionAntiguedad?: boolean; idsClasificacionAntiguedad?: number[] },
 ): Prisma.PagoReportadoWhereInput {
   const where: Prisma.PagoReportadoWhereInput = {};
   const desde = inicioDiaUTC(f.fechaDesde);
@@ -200,14 +227,15 @@ function wherePagosPrisma(
   if (f.cobradorId) where.cobradorId = f.cobradorId;
   if (f.bancoId) where.cuentaRecaudadora = { bancoId: f.bancoId };
   if (f.estado) where.estado = f.estado;
-  // Opt-in age filter. The rule is a per-row column comparison against a
-  // relation (`DATEDIFF(p.fecha_pago, mb.fecha_ejecucion) < N`), which Prisma's
-  // relation filters cannot express. The caller resolves the matching ids with
-  // the SAME raw EXISTS used by `wherePagosSql` (`idsConAntiguedad`) and passes
+  // Opt-in classification filter. The rule is a per-row column comparison
+  // against a relation (`DATEDIFF(p.fecha_pago, mb.fecha_ejecucion)` bucketed
+  // against 0 / the configured threshold), which Prisma's relation filters
+  // cannot express. The caller resolves the matching ids with the SAME raw
+  // EXISTS used by `wherePagosSql` (`idsClasificacionAntiguedad`) and passes
   // them here; an empty list means "no payment matches", so a payment with NO
   // linked movement is EXCLUDED exactly like in the SQL path.
-  if (opciones?.conAntiguedad && f.antiguedadMaxDias) {
-    where.id = { in: opciones.idsAntiguedad ?? [] };
+  if (opciones?.conClasificacionAntiguedad && f.clasificacionAntiguedad) {
+    where.id = { in: opciones.idsClasificacionAntiguedad ?? [] };
   }
   // Opt-in bank-movement date range (relation). When active, payments with NO
   // linked movement are EXCLUDED: a date filter on a relation must not silently
@@ -313,13 +341,16 @@ function camposAntiguedad(
 // ---------------------------------------------------------------------------
 
 export async function cobros(f: ReportFilters, params: PaginationParams) {
-  // Only this report opts into the bank-movement date and the age filters. The
-  // age filter is resolved to a set of ids first because Prisma cannot express
-  // the per-row DATEDIFF; `idsConAntiguedad` runs the SAME raw EXISTS.
+  // Only this report opts into the bank-movement date and the classification
+  // filters. The classification filter is resolved to a set of ids first because
+  // Prisma cannot express the per-row DATEDIFF; `idsClasificacionAntiguedad`
+  // runs the SAME raw EXISTS.
   const where = wherePagosPrisma(f, {
     conFechaMovimiento: true,
-    conAntiguedad: true,
-    idsAntiguedad: f.antiguedadMaxDias ? await idsConAntiguedad(f) : undefined,
+    conClasificacionAntiguedad: true,
+    idsClasificacionAntiguedad: f.clasificacionAntiguedad
+      ? await idsClasificacionAntiguedad(f)
+      : undefined,
   });
   // Config resolved ONCE per request and reused for every row.
   const [rows, total, agg, config] = await Promise.all([

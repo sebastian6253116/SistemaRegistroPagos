@@ -133,16 +133,17 @@ function TablaWrapper({
  * linked bank movement's execution date, persisted at validation.
  *
  * - `null`/`undefined` → no linked movement (not validated/conciliated): muted `—`.
- * - `0` → movement executed the same day it was reported: muted `Del día`.
  * - `> 0` → gap reaches the configured threshold: `Viejo` warning badge.
- * - `< 0` → the movement was executed AFTER the reported date, so the payment is
- *   NOT old; it falls in the non-old bucket alongside same-day and renders as
- *   `Del día`. The signed value itself stays visible in the `Antigüedad` column.
+ * - `<= 0` → NOT old: renders the green `Del día` success badge, the same style
+ *   the app uses for `Conciliado`. This includes the same-day case (`0`) AND
+ *   the negative gap where the movement was executed AFTER the reported date;
+ *   both are not-old, so they share one rendering. The signed value itself
+ *   stays visible in the `Antigüedad` column.
  */
 function VeredictoAntiguedad({ antiguedadDias }: { antiguedadDias?: number | null }) {
   if (antiguedadDias == null) return <span className="text-muted-foreground">—</span>;
   if (antiguedadDias > 0) return <Badge variant="warning">Viejo</Badge>;
-  return <span className="text-muted-foreground">Del día</span>;
+  return <Badge variant="success">Del día</Badge>;
 }
 
 function CobrosTab({ filtros, onPageChange }: ReportTabProps) {
@@ -846,7 +847,7 @@ export default function ReportesPage() {
   const [cobradorId, setCobradorId] = useState('');
   const [bancoId, setBancoId] = useState('');
   const [estado, setEstado] = useState('');
-  const [antiguedadMaxDias, setAntiguedadMaxDias] = useState('');
+  const [clasificacionAntiguedad, setClasificacionAntiguedad] = useState('');
   const [page, setPage] = useState(1);
 
   // Reset to the first page whenever the filters (or the active report) change.
@@ -860,7 +861,7 @@ export default function ReportesPage() {
     cobradorId,
     bancoId,
     estado,
-    antiguedadMaxDias,
+    clasificacionAntiguedad,
     tab,
   ]);
 
@@ -888,11 +889,11 @@ export default function ReportesPage() {
       cobradorId: cobradorId ? Number(cobradorId) : undefined,
       bancoId: bancoId ? Number(bancoId) : undefined,
       estado: estado || undefined,
-      // Only forward a positive integer: the API rejects 0, negatives and
-      // decimals, and sending them would turn the whole report into an error.
-      antiguedadMaxDias: /^\d+$/.test(antiguedadMaxDias) && Number(antiguedadMaxDias) > 0
-        ? Number(antiguedadMaxDias)
-        : undefined,
+      // Empty string means "no filter" and must stay out of the request.
+      clasificacionAntiguedad:
+        clasificacionAntiguedad === 'del-dia' || clasificacionAntiguedad === 'viejo'
+          ? clasificacionAntiguedad
+          : undefined,
       page,
       pageSize: REPORT_PAGE_SIZE,
     }),
@@ -904,7 +905,7 @@ export default function ReportesPage() {
       cobradorId,
       bancoId,
       estado,
-      antiguedadMaxDias,
+      clasificacionAntiguedad,
       page,
     ],
   );
@@ -973,19 +974,20 @@ export default function ReportesPage() {
                 onChange={(e) => setFechaMovimientoHasta(e.target.value)}
               />
             </div>
-            {/* Age filter: only the `cobros` report applies it, so it is shown
-                only while that tab is active, like the movement-date filter. */}
+            {/* Classification filter: only the `cobros` report applies it, so it
+                is shown only while that tab is active, like the movement-date
+                filter. */}
             <div className="space-y-1.5">
-              <Label htmlFor="r-antiguedad">Antigüedad menor a (días)</Label>
-              <Input
-                id="r-antiguedad"
-                type="number"
-                min={1}
-                inputMode="numeric"
-                placeholder="Ej. 30"
-                value={antiguedadMaxDias}
-                onChange={(e) => setAntiguedadMaxDias(e.target.value)}
-              />
+              <Label htmlFor="r-clasificacion">Clasificación</Label>
+              <Select
+                id="r-clasificacion"
+                value={clasificacionAntiguedad}
+                onChange={(e) => setClasificacionAntiguedad(e.target.value)}
+              >
+                <option value="">Todas</option>
+                <option value="del-dia">Del día</option>
+                <option value="viejo">Viejo</option>
+              </Select>
             </div>
           </>
         )}
@@ -1031,7 +1033,7 @@ export default function ReportesPage() {
               cobradorId,
               bancoId,
               estado,
-              antiguedadMaxDias,
+              clasificacionAntiguedad,
             }}
             initial={{
               fechaDesde: '',
@@ -1041,7 +1043,7 @@ export default function ReportesPage() {
               cobradorId: '',
               bancoId: '',
               estado: '',
-              antiguedadMaxDias: '',
+              clasificacionAntiguedad: '',
             }}
             onClear={() => {
               setFechaDesde('');
@@ -1051,7 +1053,7 @@ export default function ReportesPage() {
               setCobradorId('');
               setBancoId('');
               setEstado('');
-              setAntiguedadMaxDias('');
+              setClasificacionAntiguedad('');
             }}
           />
         </div>

@@ -14,7 +14,7 @@ function filtrosDe(req: Request): ReportFilters {
     cobradorId: q.cobradorId,
     bancoId: q.bancoId,
     estado: q.estado,
-    antiguedadMaxDias: q.antiguedadMaxDias,
+    clasificacionAntiguedad: q.clasificacionAntiguedad,
   };
 }
 
@@ -80,10 +80,12 @@ function subtitulo(tipo: TipoReporte, f: ReportFilters): string {
       `Movimiento: ${f.fechaMovimientoDesde ?? 'inicio'} a ${f.fechaMovimientoHasta ?? 'hoy'}`,
     );
   }
-  // Only mention the age filter where it is actually applied (the `cobros`
-  // report); advertising an unapplied filter in the subtitle is misleading.
-  if (tipo === 'cobros' && f.antiguedadMaxDias) {
-    partes.push(`Antigüedad menor a: ${f.antiguedadMaxDias} días`);
+  // Only mention the classification filter where it is actually applied (the
+  // `cobros` report); advertising an unapplied filter in the subtitle is
+  // misleading.
+  if (tipo === 'cobros' && f.clasificacionAntiguedad) {
+    const etiqueta = f.clasificacionAntiguedad === 'del-dia' ? 'Del día' : 'Viejo';
+    partes.push(`Clasificación: ${etiqueta}`);
   }
   if (f.cobradorId) partes.push(`Cobrador: ${f.cobradorId}`);
   if (f.bancoId) partes.push(`Banco: ${f.bancoId}`);
@@ -103,7 +105,7 @@ export const exportar = asyncHandler(async (req: Request, res: Response) => {
     cobradorId: q.cobradorId,
     bancoId: q.bancoId,
     estado: q.estado,
-    antiguedadMaxDias: q.antiguedadMaxDias,
+    clasificacionAntiguedad: q.clasificacionAntiguedad,
   };
 
   const reporte = await service.datosParaExport(tipo, filtros);
