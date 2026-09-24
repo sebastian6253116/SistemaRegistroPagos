@@ -335,7 +335,9 @@ Fecha, monto (Bs y USD con tasa derivada), descripción, categoría, referencia 
   siendo siempre `monto_bs / monto_usd`.
 - Un **job en proceso** consulta `https://api.farmavid.com.ve/api/rates` cada 60 minutos, guarda
   solo las tasas nuevas (deduplicadas por el `id` de la API) y lee el flag `bcv.job_habilitado`
-  en cada ciclo, por lo que puede activarse o desactivarse en caliente desde la UI. Solo se usa
+  en cada ciclo, por lo que puede activarse o desactivarse en caliente desde la UI. Además,
+  agrega una fila al histórico **solo cuando el valor cambia**: si el `usd` es igual al último
+  registrado no se inserta nada, aunque la API lo republique bajo un `id` nuevo. Solo se usa
   el valor `usd`, almacenado como cadena decimal para evitar errores de precisión.
 - La API externa devuelve únicamente el último valor; el histórico lo construye esta aplicación.
 

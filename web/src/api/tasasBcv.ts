@@ -5,7 +5,7 @@ import type { BcvJobEstado, Paginated, TasaBcv } from '@/types';
 /** Mirrors the backend SyncResult: a 200 response may still report a failed poll. */
 export interface BcvSyncResult {
   insertada: boolean;
-  motivo?: 'duplicado' | 'error';
+  motivo?: 'duplicado' | 'sin_cambio' | 'error';
   tasa?: TasaBcv;
   error?: string;
 }

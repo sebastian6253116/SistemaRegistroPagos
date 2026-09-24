@@ -58,6 +58,8 @@ export default function TasaBcvTab() {
         toast.success('Tasa BCV sincronizada');
       } else if (resultado.motivo === 'duplicado') {
         toast.success('La tasa ya estaba actualizada', 'No hay una tasa nueva para registrar.');
+      } else if (resultado.motivo === 'sin_cambio') {
+        toast.success('La tasa no cambió', 'No se agregó un registro nuevo al historial.');
       } else {
         toast.error(
           'No se pudo sincronizar',

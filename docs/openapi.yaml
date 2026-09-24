@@ -1782,8 +1782,9 @@ paths:
       summary: Sincronizar manualmente la tasa BCV
       description: |
         Requiere permiso: config.editar. Consulta la API externa una vez y guarda la tasa
-        solo si es nueva (deduplicada por `apiId`). Nunca responde 5xx por un fallo externo:
-        los errores de red o de parseo se devuelven en el cuerpo.
+        solo si es nueva (deduplicada por `apiId`); tambien se omite cuando el valor es igual
+        al ultimo almacenado, aunque la API lo republique bajo un `apiId` nuevo. Nunca responde
+        5xx por un fallo externo: los errores de red o de parseo se devuelven en el cuerpo.
       responses:
         '200':
           description: Resultado de la sincronizacion
@@ -1793,7 +1794,7 @@ paths:
                 type: object
                 properties:
                   insertada: { type: boolean, example: true }
-                  motivo: { type: string, enum: [duplicado, error], nullable: true, example: duplicado }
+                  motivo: { type: string, enum: [duplicado, sin_cambio, error], nullable: true, example: duplicado }
                   tasa:
                     type: object
                     nullable: true

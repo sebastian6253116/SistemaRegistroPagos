@@ -41,7 +41,7 @@ function serializeTasaBcv(tasa: TasaBcvPayload) {
 
 export interface SyncResult {
   insertada: boolean;
-  motivo?: 'duplicado' | 'error';
+  motivo?: 'duplicado' | 'sin_cambio' | 'error';
   tasa?: ReturnType<typeof serializeTasaBcv>;
   error?: string;
 }
@@ -49,7 +49,7 @@ export interface SyncResult {
 /**
  * Polls the external BCV API once and stores the rate when it is new.
  * Never throws: network/parse failures are returned so the job can log them
- * without crashing the process. Repeated polls are a no-op (dedupe by apiId).
+ * without crashing the process. Repeated polls are a no-op (dedupe by apiId AND by unchanged value).
  */
 export async function sincronizar(): Promise<SyncResult> {
   const controller = new AbortController();
@@ -70,6 +70,19 @@ export async function sincronizar(): Promise<SyncResult> {
     const existente = await prisma.tasaBcv.findUnique({ where: { apiId: parsed.apiId } });
     if (existente) {
       return { insertada: false, motivo: 'duplicado' };
+    }
+
+    // The external API only exposes the latest value and may republish the SAME
+    // rate under a NEW `apiId`. The history must not grow with repeated values,
+    // so a row is appended ONLY when the value differs from the most recent
+    // stored one. `usd` is compared as a Decimal (scale-insensitive), never as a
+    // string, so "36.5" and "36.500000" are the same rate.
+    const ultima = await prisma.tasaBcv.findFirst({
+      orderBy: { fechaApi: 'desc' },
+      select: { usd: true },
+    });
+    if (ultima && ultima.usd.equals(new Prisma.Decimal(parsed.usd))) {
+      return { insertada: false, motivo: 'sin_cambio' };
     }
 
     const row = await prisma.tasaBcv.create({

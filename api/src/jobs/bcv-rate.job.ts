@@ -39,6 +39,9 @@ export async function runBcvTickOnce(): Promise<void> {
     } else if (result.motivo === 'duplicado') {
       // eslint-disable-next-line no-console
       console.log('[bcv-job] No new BCV rate (apiId already stored)');
+    } else if (result.motivo === 'sin_cambio') {
+      // eslint-disable-next-line no-console
+      console.log('[bcv-job] BCV rate unchanged; history not appended');
     } else {
       // eslint-disable-next-line no-console
       console.warn(`[bcv-job] Sync failed: ${result.error ?? 'unknown error'}`);
