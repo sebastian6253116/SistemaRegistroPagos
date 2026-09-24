@@ -93,6 +93,29 @@ describe('tasasBcvService.sincronizar', () => {
     expect(result.insertada).toBe(true);
   });
 
+  it('no inserta cuando el valor upstream tiene mas de 6 decimales y redondea al ultimo', async () => {
+    stubFetch(async () => okResponse({ ...PAYLOAD, usd: 849.56412345 }));
+    mocks.findUnique.mockResolvedValue(null);
+    mocks.findFirst.mockResolvedValue({ usd: new Prisma.Decimal('849.564123') });
+
+    const result = await sincronizar();
+
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(result).toEqual({ insertada: false, motivo: 'sin_cambio' });
+  });
+
+  it('inserta cuando el valor upstream redondea a uno distinto del ultimo', async () => {
+    stubFetch(async () => okResponse({ ...PAYLOAD, usd: 849.5641236 }));
+    mocks.findUnique.mockResolvedValue(null);
+    mocks.findFirst.mockResolvedValue({ usd: new Prisma.Decimal('849.564123') });
+    mocks.create.mockResolvedValue(createdRow('ext-1', '849.564124'));
+
+    const result = await sincronizar();
+
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    expect(result.insertada).toBe(true);
+  });
+
   it('devuelve motivo error y no lanza cuando fetch falla', async () => {
     stubFetch(async () => {
       throw new Error('network down');

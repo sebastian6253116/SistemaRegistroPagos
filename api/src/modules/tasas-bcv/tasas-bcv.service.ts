@@ -77,11 +77,18 @@ export async function sincronizar(): Promise<SyncResult> {
     // so a row is appended ONLY when the value differs from the most recent
     // stored one. `usd` is compared as a Decimal (scale-insensitive), never as a
     // string, so "36.5" and "36.500000" are the same rate.
+    //
+    // The incoming value is rounded to the COLUMN SCALE (6 decimals) before
+    // comparing because `tasas_bcv.usd` is `DECIMAL(18,6)` and MySQL rounds on
+    // insert. Without this, an upstream value with more than 6 decimals would
+    // never equal its own stored (rounded) row, so every poll would append a
+    // duplicate and the history would keep growing. The stored value is still
+    // rounded by the column on insert, exactly as today.
     const ultima = await prisma.tasaBcv.findFirst({
       orderBy: { fechaApi: 'desc' },
       select: { usd: true },
     });
-    if (ultima && ultima.usd.equals(new Prisma.Decimal(parsed.usd))) {
+    if (ultima && ultima.usd.equals(new Prisma.Decimal(parsed.usd).toDecimalPlaces(6))) {
       return { insertada: false, motivo: 'sin_cambio' };
     }
 
