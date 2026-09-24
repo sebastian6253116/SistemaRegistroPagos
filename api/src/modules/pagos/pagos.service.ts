@@ -5,6 +5,7 @@ import { auditar, snapshot } from '../../lib/audit';
 import { calcularTasa } from '../../lib/money';
 import { antiguedadEnDias, clasificarPorAntiguedad, esPagoViejo } from '../../lib/classification';
 import { getConfigValues } from '../../lib/config-values';
+import { esFechaFutura } from '../../lib/dates';
 import { evaluarVinculoConciliacion } from '../conciliacion/matcher';
 import { pagoCasWhere, pagoModificadoError } from './optimistic-lock';
 import { guardarArchivo } from '../../lib/upload';
@@ -128,6 +129,10 @@ async function validarTipoPago(
  * together with both amounts.
  */
 export async function reportarPago(input: ReportarPagoInput, user: AuthUser) {
+  if (esFechaFutura(input.fechaPago)) {
+    throw ApiError.badRequest('La fecha del pago no puede ser mayor a la fecha de hoy.');
+  }
+
   let cobradorId: number;
 
   if (input.cobradorId && user.permisos.includes('pagos.ver_todos')) {
@@ -312,6 +317,10 @@ export async function editarPago(
   user: AuthUser,
   ip?: string | null,
 ) {
+  if (input.fechaPago && esFechaFutura(input.fechaPago)) {
+    throw ApiError.badRequest('La fecha del pago no puede ser mayor a la fecha de hoy.');
+  }
+
   const where = whereConAislamiento({ id }, user);
   // Resolved ONCE per request: reused for the reconciliation re-evaluation and
   // for the serialized "old document" threshold below.

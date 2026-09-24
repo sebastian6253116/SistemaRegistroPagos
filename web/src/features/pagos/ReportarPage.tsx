@@ -40,7 +40,10 @@ const baseSchema = z.object({
   referencia: z.string().min(1, 'La referencia es obligatoria').max(60),
   montoBs: decimal,
   montoUsd: decimal,
-  fechaPago: z.string().min(1, 'La fecha es obligatoria'),
+  fechaPago: z
+    .string()
+    .min(1, 'La fecha es obligatoria')
+    .refine((v) => v <= todayInputDate(), 'La fecha del pago no puede ser mayor a la fecha de hoy'),
   fechaDocumento: z.string().optional(),
   cliente: z.string().max(180).optional(),
   concepto: z.string().max(255).optional(),
@@ -434,7 +437,7 @@ export default function ReportarPage() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="fechaPago">Fecha de pago *</Label>
-                <Input id="fechaPago" type="date" className="h-11" {...register('fechaPago')} />
+                <Input id="fechaPago" type="date" className="h-11" max={todayInputDate()} {...register('fechaPago')} />
                 {errors.fechaPago && <p className="text-xs text-destructive">{errors.fechaPago.message}</p>}
               </div>
               <div className="space-y-1.5">

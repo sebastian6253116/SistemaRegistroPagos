@@ -2028,6 +2028,9 @@ paths:
         estrictamente positivo. Un valor no numerico, cero o negativo responde **400**
         con "El monto debe ser un numero positivo" (regla compartida con
         `PUT /pagos/{id}`), evitando que el error derive en un 500.
+
+        Una `fechaPago` posterior al "hoy" del negocio (America/Caracas, UTC-4)
+        responde **400** con "La fecha del pago no puede ser mayor a la fecha de hoy.".
       requestBody:
         required: true
         content:
@@ -2289,6 +2292,9 @@ paths:
         lo limpia. La regla de obligatoriedad se evalua sobre el valor resultante:
         con `pago.banco_origen_obligatorio` activo (`'1'`) un pago sin banco
         responde 400 "El banco de origen es obligatorio.".
+
+        Una `fechaPago` opcional posterior al "hoy" del negocio (America/Caracas,
+        UTC-4) responde **400** con "La fecha del pago no puede ser mayor a la fecha de hoy.".
       requestBody:
         required: true
         content:

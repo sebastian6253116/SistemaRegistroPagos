@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
+import { hoyCaracas, sumarDias } from '../../lib/dates';
 
 /**
  * Dashboard aggregates (spec section 6.2).
@@ -11,20 +12,6 @@ import { prisma } from '../../lib/prisma';
  *
  * All aggregates are computed in the database; Node only shapes the response.
  */
-const CARACAS_OFFSET_MS = 4 * 60 * 60 * 1000; // UTC-4, no DST
-
-/** Business "today" (America/Caracas) as a YYYY-MM-DD string. */
-function hoyCaracas(): string {
-  return new Date(Date.now() - CARACAS_OFFSET_MS).toISOString().slice(0, 10);
-}
-
-/** Adds days to a YYYY-MM-DD string, returning a YYYY-MM-DD string. */
-function sumarDias(fecha: string, dias: number): string {
-  const d = new Date(`${fecha}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + dias);
-  return d.toISOString().slice(0, 10);
-}
-
 function money(value: unknown): string {
   return new Prisma.Decimal(value == null ? '0' : String(value)).toFixed(2);
 }

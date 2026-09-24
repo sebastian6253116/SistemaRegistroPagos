@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { editarPago } from '@/api/pagos';
 import { getApiErrorMessage } from '@/api/client';
-import { derivedRate, formatRate } from '@/lib/format';
+import { derivedRate, formatRate, todayInputDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -80,6 +80,7 @@ export function EditarPagoDialog({ pago, onClose, onSuccess }: EditarPagoDialogP
 
   const esValidado = pago?.estado === 'validado';
   const esPendiente = pago?.estado === 'pendiente';
+  const fechaFutura = form.fechaPago !== '' && form.fechaPago > todayInputDate();
   const titulo = esPendiente ? 'Editar pago pendiente' : esValidado ? 'Editar pago validado' : 'Editar pago';
 
   const tasaEdit = derivedRate(
@@ -100,7 +101,7 @@ export function EditarPagoDialog({ pago, onClose, onSuccess }: EditarPagoDialogP
           </Button>
           <Button
             loading={edicionMutation.isPending}
-            disabled={!form.fechaPago}
+            disabled={!form.fechaPago || fechaFutura}
             onClick={() => edicionMutation.mutate()}
           >
             Guardar cambios
@@ -124,10 +125,14 @@ export function EditarPagoDialog({ pago, onClose, onSuccess }: EditarPagoDialogP
             id="edit-fecha"
             type="date"
             className="h-11"
+            max={todayInputDate()}
             value={form.fechaPago}
             onChange={(e) => setForm({ ...form, fechaPago: e.target.value })}
           />
         </div>
+        {fechaFutura && (
+          <p className="text-xs text-destructive">La fecha del pago no puede ser mayor a la fecha de hoy.</p>
+        )}
         <div className="space-y-1.5">
           <Label htmlFor="edit-ref">Referencia</Label>
           <Input

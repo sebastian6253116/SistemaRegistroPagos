@@ -384,6 +384,17 @@ Fecha, monto (Bs y USD con tasa derivada), descripción, categoría, referencia 
 - Se eligió una **columna nullable** en lugar de crear un banco "N/A": una fila fantasma
   contaminaría el catálogo de bancos y los filtros de los reportes.
 
+### 8.11 Fecha de pago no puede ser futura
+
+- No se puede **reportar** ni **editar** un pago con `fechaPago` posterior al "hoy" del negocio
+  (America/Caracas, UTC-4).
+- El backend es la fuente de verdad: `POST /pagos` y `PUT /pagos/:id` responden **400** con "La
+  fecha del pago no puede ser mayor a la fecha de hoy." (no un `validation_error` genérico).
+- El formulario de reporte y el diálogo de edición bloquean la fecha futura (`max` del input +
+  mensaje inline).
+- La regla usa el mismo "hoy" del negocio que el dashboard (`api/src/lib/dates.ts`,
+  `hoyCaracas()`), por lo que un `fechaPago` igual a hoy o anterior siempre es válido.
+
 ---
 
 ## 9. Manejo de fechas y zonas horarias
